@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>《騎遍台灣》V2.6 單車環島復健遊戲</title>
+  <title>《騎遍台灣》V2.7 單車環島復健遊戲</title>
   <link rel="stylesheet" href="css/style.css">
   <script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -11,7 +11,7 @@
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.6</span></div>
+      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.7</span></div>
       <div id="topActions" style="display:flex;align-items:center;gap:6px;">
         <span id="connStatusPill" class="pill sim">⌨️ 單機 / 觸控</span>
         <button id="muteBtn" class="icon-btn" type="button">🔊 音效</button>
@@ -108,6 +108,14 @@
             <button type="button" class="chip" data-freq="low">稀疏</button>
             <button type="button" class="chip selected" data-freq="medium">適中</button>
             <button type="button" class="chip" data-freq="high">密集</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label"><span>補給品外觀</span></div>
+          <div class="chip-group two-col">
+            <button type="button" class="chip selected" data-snack="local">各地特色小吃（推薦）</button>
+            <button type="button" class="chip" data-snack="basic">統一基礎（香蕉＋水壺）</button>
           </div>
         </div>
 

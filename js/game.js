@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  const { LANDMARKS, SPRINT_ROUTES, COLLECTIBLES, UNITS_PER_STATION } = window.RideTaiwanData;
+  const { LANDMARKS, SPRINT_ROUTES, COLLECTIBLES, BUMP_SKINS, CYCLIST_SKINS, UNITS_PER_STATION } = window.RideTaiwanData;
   const { TiltSensorEngine, RehabLink, requestWakeLock } = window.TiltRehabKit;
   const AudioFX = window.RehabAudio;
   const STORAGE_KEY = 'rtw_v2_save_data';
@@ -68,6 +68,7 @@
     speedControl: 'auto',
     safetyAssist: true,
     lowMotion: false,
+    snackStyle: 'local',
     steeringMode: 'smooth',
     steerInput: 0,
     steerVel: 0,
@@ -76,6 +77,8 @@
     corridorCurL: -0.5,
     corridorCurR: 0.5,
     corridorInitSec: 0,
+    corridorExiting: false,
+    corridorExitSec: 0,
     prevStationIdx: 0,
     curStationIdx: 0,
     biomeFade: 1,
@@ -306,6 +309,8 @@
     state.corridorCurL = -0.5;
     state.corridorCurR = 0.5;
     state.corridorInitSec = 0;
+    state.corridorExiting = false;
+    state.corridorExitSec = 0;
     state.emptyRoadSec = 0;
     state.stoppedAtConstruction = false;
     state.constructionWaitSec = 0;
@@ -413,6 +418,14 @@
   }
 
   // --- 5-Level Choreographed Wave & Cooldown Spawner ---
+  function pickSnack() {
+    if (state.snackStyle === 'local') {
+      const lm = LANDMARKS[state.curStationIdx] || LANDMARKS[0];
+      if (lm && lm.localSnack) return lm.localSnack;
+    }
+    return COLLECTIBLES[Math.floor(state.rng() * COLLECTIBLES.length)];
+  }
+
   function enqueueWavePattern() {
     const r = state.rng;
     const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
@@ -421,7 +434,7 @@
     // L1: Gentle single collectibles or 1-lane puddles
     if (!cfg.allowWave) {
       if (roll < 0.45) {
-        const item = COLLECTIBLES[Math.floor(r() * COLLECTIBLES.length)];
+        const item = pickSnack();
         const lane = r() < 0.5 ? -1 : 1;
         state.waveQueue.push({ template: 'collect', lane, item });
       } else {
@@ -433,8 +446,8 @@
     }
 
     // L2-L5: Mix collectibles, 2-lane waves, cyclist (15s CD), construction (20s CD), corridor (mutex with construction)
-    if (roll < 0.24) {
-      const item = COLLECTIBLES[Math.floor(r() * COLLECTIBLES.length)];
+    if (roll < (state.stamina < 50 ? 0.50 : 0.28)) {
+      const item = pickSnack();
       const startLane = Math.floor(r() * 3) - 1;
       const dir = startLane === -1 ? 1 : (startLane === 1 ? -1 : (r() < 0.5 ? 1 : -1));
       const count = state.level === 'L2' ? 2 : 4;
@@ -507,14 +520,18 @@
         showBanner('🚧 前方施工，請靠' + dirText + '通行！', 'warn');
         state.events.push({ template: 'obstacle', kind: 'construction', safeLane: next.safeLane, blockedLanes: next.blockedLanes, z: initialZ, resolved: false });
       } else if (next.kind === 'cyclist') {
-        state.events.push({ template: 'obstacle', kind: 'cyclist', lane: next.lane, z: initialZ, resolved: false, tight: !!next.tight });
+        const cSkin = CYCLIST_SKINS[Math.floor(state.rng() * CYCLIST_SKINS.length)];
+        state.events.push({ template: 'obstacle', kind: 'cyclist', lane: next.lane, skin: cSkin, z: initialZ, resolved: false, tight: !!next.tight });
       } else {
-        state.events.push({ template: 'obstacle', kind: 'bump', blockedLanes: next.blockedLanes, z: initialZ, resolved: false, tight: !!next.tight });
+        const bSkin = BUMP_SKINS[Math.floor(state.rng() * BUMP_SKINS.length)];
+        state.events.push({ template: 'obstacle', kind: 'bump', blockedLanes: next.blockedLanes, skin: bSkin, z: initialZ, resolved: false, tight: !!next.tight });
       }
     } else if (next.template === 'corridor') {
       state.corridorCurL = -0.5;
       state.corridorCurR = 0.5;
       state.corridorInitSec = 0;
+    state.corridorExiting = false;
+    state.corridorExitSec = 0;
       state.corridorTransition = 0;
       state.events.push({ template: 'corridor', seq: next.seq, segIndex: 0, segProgress: 0, failed: false, z: initialZ });
       showBanner('⚠️ 前方道路縮減！請準備進入安全車道', 'warn');
@@ -604,7 +621,7 @@
       state.clouds.forEach((c) => { c.x = (c.x + dt * 0.012 * c.s) % 1.15; });
     }
 
-    const drainRate = (state.stoppedAtConstruction || state.stoppedAtCorridor) ? 0.8 : (state.throttle === 1 ? 4.5 : 3.2);
+    const drainRate = (state.stoppedAtConstruction || state.stoppedAtCorridor) ? 0.5 : (state.throttle === 1 ? 2.4 : 1.4);
     state.stamina = Math.max(0, state.stamina - drainRate * dt);
 
     if (state.mode === 'timed' && state.elapsedSec >= state.timedMinutes * 60) { endGame('timeup'); return; }
@@ -626,16 +643,19 @@
       state.bikeLean = state.lowMotion ? 0 : (state.lane - prevX) * 0.22;
     }
 
-    const curIdx = getCurrentStationIndex();
-    if (curIdx !== state.curStationIdx) {
-      state.prevStationIdx = state.curStationIdx;
-      state.curStationIdx = curIdx;
-      state.biomeFade = 0;
+    const corridorActive = state.events.some((e) => e.template === 'corridor');
+    if (!corridorActive) {
+      const curIdx = getCurrentStationIndex();
+      if (curIdx !== state.curStationIdx) {
+        state.prevStationIdx = state.curStationIdx;
+        state.curStationIdx = curIdx;
+        state.biomeFade = 0;
+      }
+      if (state.biomeFade < 1) state.biomeFade = Math.min(1, state.biomeFade + dt / 1.8);
+      const curLm = LANDMARKS[curIdx] || LANDMARKS[0];
+      const targetOffset = state.lowMotion ? 0 : curLm.roadOffset;
+      state.roadOffset += (targetOffset - state.roadOffset) * Math.min(1, dt * 0.9);
     }
-    if (state.biomeFade < 1) state.biomeFade = Math.min(1, state.biomeFade + dt / 1.8);
-    const curLm = LANDMARKS[curIdx] || LANDMARKS[0];
-    const targetOffset = state.lowMotion ? 0 : curLm.roadOffset;
-    state.roadOffset += (targetOffset - state.roadOffset) * Math.min(1, dt * 0.9);
 
     const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
     const spdScale = state.baseSpeedLevel === 'slow' ? 0.85 : (state.baseSpeedLevel === 'fast' ? 1.18 : 1.0);
@@ -644,10 +664,10 @@
     let speedMult = staminaFactor;
 
     if (state.speedControl === 'manual') {
-      if (state.throttle === 1) speedMult *= 1.30;
+      if (state.throttle === 1) speedMult *= 1.55;
       else if (state.throttle === -1) speedMult *= 0.45;
     } else if (state.throttle !== 0) {
-      speedMult *= (state.throttle === 1 ? 1.18 : 0.65);
+      speedMult *= (state.throttle === 1 ? 1.45 : 0.65);
     }
 
     const frontObs = state.events.find((e) => e.template === 'obstacle' && e.z < 0.40 && e.z > 0.16);
@@ -789,7 +809,8 @@
               state.decelCount += 1;
               state.combo = 0;
               AudioFX.playBell();
-              showBanner('🚴 被慢速車友擋住了！請換道超車', 'warn');
+              const lbl = ev.skin ? ev.skin.label : '慢速車友';
+              showBanner((ev.skin ? ev.skin.icon : '🚴') + ' 被' + lbl + '擋住了！請換道超車', 'warn');
             } else if (ev.z <= 0.04 && !ev.resolved) {
               ev.resolved = true;
               recordEventOutcome(true, state.lane);
@@ -822,14 +843,27 @@
       }
 
       if (ev.template === 'corridor') {
+        if (state.corridorExiting) {
+          state.corridorExitSec += dt;
+          state.corridorCurL += (-0.5 - state.corridorCurL) * Math.min(1, dt * 2.5);
+          state.corridorCurR += (0.5 - state.corridorCurR) * Math.min(1, dt * 2.5);
+          if (state.corridorExitSec >= 1.2) {
+            state.corridorExiting = false;
+            state.corridorTransition = 0;
+            hideBanner();
+            state.events.splice(i, 1);
+          }
+          continue;
+        }
+
         const laneOffsets = { '-1': [-0.5, -0.165], '0': [-0.165, 0.165], '1': [0.165, 0.5] };
         const targetLane = ev.seq[ev.segIndex];
         const [tL, tR] = laneOffsets[String(targetLane)];
         const dirName = targetLane === -1 ? '左側' : (targetLane === 0 ? '中央' : '右側');
 
         state.corridorInitSec += dt;
-        state.corridorTransition = Math.min(1, state.corridorInitSec / 1.5);
-        const glideSpeed = state.corridorTransition < 1 ? 2.6 : 2.2;
+        state.corridorTransition = Math.min(1, state.corridorInitSec / 1.8);
+        const glideSpeed = state.corridorTransition < 1 ? 1.8 : 1.15;
         state.corridorCurL += (tL - state.corridorCurL) * Math.min(1, dt * glideSpeed);
         state.corridorCurR += (tR - state.corridorCurR) * Math.min(1, dt * glideSpeed);
 
@@ -837,27 +871,27 @@
         if (state.corridorTransition < 1) {
           showBanner('⚠️ 道路縮減中！請移至' + dirName + '安全車道', 'warn');
         } else {
-          const inSafe = Math.abs(state.bikeXNorm - curCenterLane) < 0.55;
+          const inSafe = Math.abs(state.bikeXNorm - curCenterLane) < 0.58;
           if (!inSafe) {
             state.stoppedAtCorridor = true;
             showBanner('🛑 路已縮減！請切入' + dirName + '車道才可前進', 'warn');
           } else {
             state.stoppedAtCorridor = false;
             showBanner('🛣️ 順著單線彎道前進 (' + (ev.segIndex + 1) + '/' + ev.seq.length + ' → ' + dirName + ')', 'boost');
-            ev.segProgress += dt * 0.65;
+            ev.segProgress += dt * 0.36;
             if (ev.segProgress >= 1.0) {
               ev.segProgress = 0;
               ev.segIndex += 1;
               if (ev.segIndex >= ev.seq.length) {
                 state.stoppedAtCorridor = false;
-                state.corridorTransition = 0;
-                hideBanner();
+                state.corridorExiting = true;
+                state.corridorExitSec = 0;
                 recordEventOutcome(true, state.lane);
                 state.boostTimer = 1.0;
                 state.accelCount += 1;
                 AudioFX.playBoost();
                 spawnFeedback(state.lane, '✨ 單線彎道通過！加速 1 秒', '#0f766e');
-                state.events.splice(i, 1);
+                showBanner('🛣️ 道路恢復寬闊三線道！', 'boost');
               }
             }
           }
@@ -1161,7 +1195,7 @@
       }
     }
 
-    if (state.boostTimer > 0 && !state.lowMotion) {
+    if ((state.boostTimer > 0 || state.throttle === 1) && !state.lowMotion) {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'; ctx.lineWidth = 2;
       for (let i = 0; i < 6; i++) {
         const lx = (i % 2 === 0 ? 18 : w - 18) + (Math.random() * 14 - 7);
@@ -1195,19 +1229,24 @@
         const y = horizonY + Math.pow(p, 1.45) * (h * 0.78 - horizonY);
         const r = 14 + p * 20;
         if (ev.kind === 'bump') {
+          const sk = ev.skin || BUMP_SKINS[0];
           ev.blockedLanes.forEach((bl) => {
             const x = laneToScreenX(bl, ev.z, w);
-            ctx.fillStyle = '#38bdf8';
-            ctx.beginPath(); ctx.ellipse(x, y, r * 1.15, r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = sk.bg;
+            ctx.beginPath();
+            if (sk.ellipse) ctx.ellipse(x, y, r * 1.15, r * 0.55, 0, 0, Math.PI * 2);
+            else ctx.arc(x, y, r * 0.85, 0, Math.PI * 2);
+            ctx.fill();
             ctx.font = Math.round(r) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText('💦', x, y);
+            ctx.fillText(sk.icon, x, y);
           });
         } else if (ev.kind === 'cyclist') {
+          const sk = ev.skin || CYCLIST_SKINS[0];
           const x = laneToScreenX(ev.lane, ev.z, w);
-          ctx.fillStyle = '#fef3c7'; ctx.strokeStyle = '#d97706'; ctx.lineWidth = 3;
+          ctx.fillStyle = sk.bg; ctx.strokeStyle = sk.border; ctx.lineWidth = 3;
           ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
           ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText('🚴', x, y + 1);
+          ctx.fillText(sk.icon, x, y + 1);
         } else if (ev.kind === 'construction') {
           ev.blockedLanes.forEach((bl) => {
             const x = laneToScreenX(bl, ev.z, w);
@@ -1460,6 +1499,12 @@
       b.addEventListener('click', () => {
         state.eventFreq = b.dataset.freq;
         document.querySelectorAll('[data-freq]').forEach((x) => x.classList.toggle('selected', x === b));
+      });
+    });
+    document.querySelectorAll('[data-snack]').forEach((b) => {
+      b.addEventListener('click', () => {
+        state.snackStyle = b.dataset.snack;
+        document.querySelectorAll('[data-snack]').forEach((x) => x.classList.toggle('selected', x === b));
       });
     });
     document.querySelectorAll('[data-steer]').forEach((b) => {
