@@ -1,5 +1,5 @@
 /**
- * Taiwan Landmarks & Collectibles Data for 《騎遍台灣》 V1.0
+ * Taiwan 9-Stop Tour, Fixed Sprint Routes & Collectibles for 《騎遍台灣》 V2.0
  */
 (function (global) {
   'use strict';
@@ -7,160 +7,123 @@
   const LANDMARKS = [
     {
       id: 'taipei_101',
-      county: '台北市',
+      order: 1,
+      icon: '🏙️',
+      county: '台北',
       name: '台北 101',
       subtitle: '啟程！城市與山林的起點',
-      description: '從繁華的台北出發，仰望高聳的台北 101，迎著春風與櫻花展開單車環島之旅！',
+      description: '從台北河濱出發，仰望高聳的台北 101 與春日櫻花，正式展開台灣環島單車旅程！',
       image: 'images/landmark_01.jpg',
-      theme: {
-        skyTop: '#BAE6FD',
-        skyBottom: '#FEF3C7',
-        hillBack: '#86EFAC',
-        hillFront: '#4ADE80',
-        ground: '#DCFCE7',
-        accent: '#0F766E'
-      }
+      theme: { skyTop: '#BAE6FD', skyBottom: '#FEF3C7', hillBack: '#86EFAC', hillFront: '#4ADE80', ground: '#DCFCE7', accent: '#0F766E', road: '#475569' }
     },
     {
-      id: 'yehliu',
-      county: '新北市',
-      name: '野柳女王頭',
-      subtitle: '北海岸的奇岩海風',
-      description: '沿著北海岸公路騎行，海風吹拂臉龐，欣賞大自然雕刻千年的女王頭奇景。',
+      id: 'nanliao',
+      order: 2,
+      icon: '🚲',
+      county: '新竹',
+      name: '南寮漁港',
+      subtitle: '迎風飛翔的十七公里海岸線',
+      description: '騎上新竹南寮海濱車道，藍白鐘樓與漫天風箏在陽光下閃耀，海風帶來滿滿活力。',
       image: 'images/landmark_02.jpg',
-      theme: {
-        skyTop: '#93C5FD',
-        skyBottom: '#FDE68A',
-        hillBack: '#38BDF8',
-        hillFront: '#60A5FA',
-        ground: '#FEF3C7',
-        accent: '#0284C7'
-      }
+      theme: { skyTop: '#7DD3FC', skyBottom: '#E0F2FE', hillBack: '#38BDF8', hillFront: '#0EA5E9', ground: '#FEF9C3', accent: '#0284C7', road: '#475569' }
     },
     {
       id: 'gaomei',
-      county: '台中市',
+      order: 3,
+      icon: '🌅',
+      county: '台中',
       name: '高美濕地',
       subtitle: '夕陽映照的天空之鏡',
-      description: '騎進台中海線，木棧道延伸入金橘色晚霞與潮汐濕地，風車緩緩轉動陪伴旅人。',
+      description: '沿著台中海線前行，木棧道延伸入金橘色晚霞，遠方白色風車緩緩轉動陪伴旅人。',
       image: 'images/landmark_03.jpg',
-      theme: {
-        skyTop: '#FDA4AF',
-        skyBottom: '#FDE68A',
-        hillBack: '#FDBA74',
-        hillFront: '#FB923C',
-        ground: '#FFEDD5',
-        accent: '#EA580C'
-      }
+      theme: { skyTop: '#FDA4AF', skyBottom: '#FDE68A', hillBack: '#FDBA74', hillFront: '#FB923C', ground: '#FFEDD5', accent: '#EA580C', road: '#57534E' }
     },
     {
-      id: 'alishan',
-      county: '嘉義縣',
-      name: '阿里山',
-      subtitle: '雲海與神木的森林浴',
-      description: '穿梭在百年檜木林間，看見紅色森林小火車鳴笛經過，感受山林的清新芬多精。',
+      id: 'anping',
+      order: 4,
+      icon: '🏯',
+      county: '台南',
+      name: '安平古堡',
+      subtitle: '紅磚老樹的府城暖陽',
+      description: '進入文化古都台南，紅磚古城牆與老榕樹氣根在金色陽光下顯得格外溫暖親切。',
       image: 'images/landmark_04.jpg',
-      theme: {
-        skyTop: '#A7F3D0',
-        skyBottom: '#FEF08A',
-        hillBack: '#15803D',
-        hillFront: '#166534',
-        ground: '#D1FAE5',
-        accent: '#15803D'
-      }
+      theme: { skyTop: '#FDE68A', skyBottom: '#FFEDD5', hillBack: '#84CC16', hillFront: '#65A30D', ground: '#FEF3C7', accent: '#B45309', road: '#57534E' }
     },
     {
       id: 'dragon_tiger',
-      county: '高雄市',
+      order: 5,
+      icon: '🐉',
+      county: '高雄',
       name: '龍虎塔',
       subtitle: '蓮池潭畔的熱情陽光',
-      description: '來到熱情的南台灣高雄，在蓮池潭邊欣賞繽紛的龍虎雙塔與盛開的粉紅蓮花！',
+      description: '來到南台灣高雄蓮池潭，繽紛的龍虎雙塔與盛開粉紅蓮花，為單車旅人加油打氣！',
       image: 'images/landmark_05.jpg',
-      theme: {
-        skyTop: '#7DD3FC',
-        skyBottom: '#FEF9C3',
-        hillBack: '#34D399',
-        hillFront: '#10B981',
-        ground: '#ECFDF5',
-        accent: '#D97706'
-      }
+      theme: { skyTop: '#7DD3FC', skyBottom: '#FEF9C3', hillBack: '#34D399', hillFront: '#10B981', ground: '#ECFDF5', accent: '#D97706', road: '#475569' }
     },
     {
       id: 'eluanbi',
-      county: '屏東縣',
-      name: '鵝鑾鼻燈塔',
+      order: 6,
+      icon: '🌴',
+      county: '屏東',
+      name: '鵝鑾鼻',
       subtitle: '台灣最南端的守護光芒',
-      description: '迎著南國海風抵達台灣最南端，潔白的燈塔矗立在翠綠草坡上，眺望湛藍巴士海峽。',
+      description: '迎著南國海風抵達墾丁鵝鑾鼻，潔白燈塔矗立在翠綠草坡上，眺望湛藍巴士海峽。',
       image: 'images/landmark_06.jpg',
-      theme: {
-        skyTop: '#60A5FA',
-        skyBottom: '#E0F2FE',
-        hillBack: '#22C55E',
-        hillFront: '#16A34A',
-        ground: '#DCFCE7',
-        accent: '#0369A1'
-      }
+      theme: { skyTop: '#60A5FA', skyBottom: '#E0F2FE', hillBack: '#22C55E', hillFront: '#16A34A', ground: '#DCFCE7', accent: '#0369A1', road: '#475569' }
     },
     {
       id: 'sanxiantai',
-      county: '台東縣',
+      order: 7,
+      icon: '🌊',
+      county: '台東',
       name: '三仙台',
       subtitle: '跨海八拱橋的太平洋曙光',
-      description: '轉往東台灣台 11 線，太平洋的浪花拍打礁岩，紅白相間的八拱橋迎接溫暖晨光。',
+      description: '轉入東台灣台 11 線，太平洋浪花拍打礁岩，紅白八拱橋迎接溫暖的晨光與海風。',
       image: 'images/landmark_07.jpg',
-      theme: {
-        skyTop: '#FBCFE8',
-        skyBottom: '#FDE68A',
-        hillBack: '#0EA5E9',
-        hillFront: '#0284C7',
-        ground: '#F0F9FF',
-        accent: '#E11D48'
-      }
+      theme: { skyTop: '#FBCFE8', skyBottom: '#FDE68A', hillBack: '#0EA5E9', hillFront: '#0284C7', ground: '#F0F9FF', accent: '#E11D48', road: '#475569' }
     },
     {
       id: 'qixingtan',
-      county: '花蓮縣',
+      order: 8,
+      icon: '⛰️',
+      county: '花蓮',
       name: '七星潭',
       subtitle: '大山與月牙海灣的對話',
-      description: '沿著花蓮濱海自行車道前行，一側是雄偉的中央山脈，一側是蔚藍的月牙形礫石海灣。',
+      description: '沿著花蓮濱海自行車道奔馳，左側是雄偉中央山脈，右側是療癒的月牙形礫石海灣。',
       image: 'images/landmark_08.jpg',
-      theme: {
-        skyTop: '#BAE6FD',
-        skyBottom: '#F0FDF4',
-        hillBack: '#059669',
-        hillFront: '#047857',
-        ground: '#E0F2FE',
-        accent: '#0D9488'
-      }
+      theme: { skyTop: '#BAE6FD', skyBottom: '#F0FDF4', hillBack: '#059669', hillFront: '#047857', ground: '#E0F2FE', accent: '#0D9488', road: '#475569' }
     },
     {
-      id: 'lanyang',
-      county: '宜蘭縣',
-      name: '蘭陽博物館',
-      subtitle: '單面山倒影與環島圓滿',
-      description: '最後一站來到宜蘭烏石港畔，單面山造型的博物館倒映在平靜水面上，恭喜完成環島旅程！',
+      id: 'waiao',
+      order: 9,
+      icon: '🏖️',
+      county: '宜蘭',
+      name: '外澳海灘',
+      subtitle: '遙望龜山島的環島圓滿',
+      description: '最後一站來到宜蘭外澳沙灘，望著海上龜山島與溫柔浪花，恭喜完成台灣環島一圈！',
       image: 'images/landmark_09.jpg',
-      theme: {
-        skyTop: '#A5F3FC',
-        skyBottom: '#FEF3C7',
-        hillBack: '#4ADE80',
-        hillFront: '#22C55E',
-        ground: '#ECFDF5',
-        accent: '#0F766E'
-      }
+      theme: { skyTop: '#A5F3FC', skyBottom: '#FEF3C7', hillBack: '#4ADE80', hillFront: '#22C55E', ground: '#ECFDF5', accent: '#0F766E', road: '#475569' }
     }
   ];
 
+  // Fixed Sprint Routes (for fair historical time comparison with seeded events)
+  const SPRINT_ROUTES = [
+    { id: 'west_coast', name: '北中海線衝線（台北 → 台中）', startStation: 0, distanceUnits: 3000, seed: 202611 },
+    { id: 'south_east', name: '南東山海衝線（高雄 → 花蓮）', startStation: 4, distanceUnits: 4000, seed: 202622 },
+    { id: 'full_island', name: '全環島九站衝線（台北 → 宜蘭）', startStation: 0, distanceUnits: 9000, seed: 202699 }
+  ];
+
   const COLLECTIBLES = [
-    { id: 'stamp', name: '旅行郵票', icon: '📮', points: 10, color: '#EF4444' },
-    { id: 'water', name: '運動水壺', icon: '🧴', points: 10, color: '#0EA5E9' },
-    { id: 'banana', name: '旗山香蕉', icon: '🍌', points: 15, color: '#EAB308' },
-    { id: 'boba', name: '珍珠奶茶', icon: '🧋', points: 15, color: '#D97706' },
-    { id: 'pineapple', name: '鳳梨酥', icon: '🍍', points: 20, color: '#F59E0B' }
+    { id: 'banana', name: '旗山香蕉', icon: '🍌', stamina: 12, color: '#EAB308' },
+    { id: 'water', name: '運動水壺', icon: '🧴', stamina: 10, color: '#0EA5E9' },
+    { id: 'boba', name: '珍珠奶茶', icon: '🧋', stamina: 14, color: '#D97706' },
+    { id: 'onigiri', name: '池上飯糰', icon: '🍙', stamina: 12, color: '#10B981' }
   ];
 
   global.RideTaiwanData = {
     LANDMARKS,
-    COLLECTIBLES
+    SPRINT_ROUTES,
+    COLLECTIBLES,
+    UNITS_PER_STATION: 1000 // 9 stations = 9000 units for 1 full Taiwan loop
   };
 })(window);
