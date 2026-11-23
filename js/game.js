@@ -1304,13 +1304,13 @@
       ctx.save();
       ctx.globalAlpha = alpha;
       if (b.biome === 'river_left' || b.biome === 'harbor_left') {
-        ctx.fillStyle = b.biome === 'river_left' ? '#38bdf8' : '#0ea5e9';
+        const wg = ctx.createLinearGradient(0, horizonY, 0, h); wg.addColorStop(0, '#bae6fd'); wg.addColorStop(0.5, '#7dd3fc'); wg.addColorStop(1, '#38bdf8'); ctx.fillStyle = wg;
         ctx.beginPath();
         ctx.moveTo(0, horizonY); ctx.lineTo(topCX - roadTopW * 0.65, horizonY);
         ctx.lineTo(botCX - roadBotW * 0.65, h); ctx.lineTo(0, h);
         ctx.closePath(); ctx.fill();
       } else if (b.biome === 'ocean_right' || b.biome === 'wetland_right' || b.biome === 'cliff_ocean' || b.biome === 'paddy_ocean') {
-        ctx.fillStyle = b.biome === 'wetland_right' ? '#fdba74' : '#0284c7';
+        const og = ctx.createLinearGradient(0, horizonY, 0, h); og.addColorStop(0, b.biome === 'wetland_right' ? '#fed7aa' : '#99f6e4'); og.addColorStop(1, b.biome === 'wetland_right' ? '#fb923c' : '#0ea5e9'); ctx.fillStyle = og;
         ctx.beginPath();
         ctx.moveTo(topCX + roadTopW * 0.65, horizonY); ctx.lineTo(w, horizonY);
         ctx.lineTo(w, h); ctx.lineTo(botCX + roadBotW * 0.65, h);
@@ -1338,13 +1338,38 @@
     const fade = state.biomeFade;
     const th = lm.theme;
 
-    const sky = ctx.createLinearGradient(0, 0, 0, h * 0.42);
-    sky.addColorStop(0, lerpHex(prevLm.theme.skyTop, th.skyTop, fade));
-    sky.addColorStop(1, lerpHex(prevLm.theme.skyBottom, th.skyBottom, fade));
-    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h * 0.44);
-
-    const horizonY = h * 0.40;
-    drawCountyHorizon(ctx, lm, prevLm, fade, w, horizonY, state.elapsedSec);
+    const horizonY = h * 0.41;
+    const bgKeyFor = (b) => {
+      if (b === 'river_left' || b === 'harbor_left') return 'bg_harbor_river';
+      if (b === 'mountain_inland') return 'bg_mountain_inland';
+      if (b === 'oldtown_asym' || b === 'paddy_inland') return 'bg_town_paddy';
+      return 'bg_coast_ocean';
+    };
+    const drawBg = (key, alpha) => {
+      const img = SPRITES[key];
+      if (!img || !img.complete || img.naturalWidth === 0) return false;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const pan = state.lowMotion ? 0 : Math.sin(state.distance * 0.0005) * 18;
+      const drawW = Math.max(w + 40, horizonY * 1.9);
+      const drawH = horizonY + 12;
+      ctx.drawImage(img, (w - drawW) * 0.5 + pan, 0, drawW, drawH);
+      ctx.restore();
+      return true;
+    };
+    const curBgKey = bgKeyFor(lm.biome);
+    const prevBgKey = bgKeyFor(prevLm.biome);
+    const drewBg = drawBg(curBgKey, 1);
+    if (fade < 1 && prevBgKey !== curBgKey) {
+      drawBg(prevBgKey, 1 - fade);
+    }
+    if (!drewBg) {
+      const sky = ctx.createLinearGradient(0, 0, 0, h * 0.42);
+      sky.addColorStop(0, lerpHex(prevLm.theme.skyTop, th.skyTop, fade));
+      sky.addColorStop(1, lerpHex(prevLm.theme.skyBottom, th.skyBottom, fade));
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h * 0.44);
+      drawCountyHorizon(ctx, lm, prevLm, fade, w, horizonY, state.elapsedSec);
+    }
 
     const roadTopW = w * 0.20;
     const roadBotW = w * 0.76;
@@ -1468,7 +1493,14 @@
         ctx.beginPath(); ctx.arc(x, y, r * 1.32, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#fefce8'; ctx.strokeStyle = '#eab308'; ctx.lineWidth = 4;
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        const snackMap = { '🍌': 'item_banana', '🧋': 'item_boba', '🧴': 'item_water', '🍙': 'item_onigiri' };
+        const snackMap = {
+          '🍌': 'item_banana', '🧋': 'item_boba', '🧴': 'item_water', '🍙': 'item_onigiri',
+          '🍧': 'item_shaved_ice', '🌵': 'item_shaved_ice',
+          '🥮': 'item_pastry', '🥞': 'item_pastry', '🥟': 'item_pastry',
+          '🍲': 'item_soup', '🍗': 'item_soup', '🍚': 'item_soup', '🍣': 'item_soup',
+          '🍢': 'item_meatball', '🟫': 'item_meatball',
+          '🍵': 'item_tea', '🫖': 'item_tea', '🍡': 'item_mochi'
+        };
         const skey = snackMap[ev.item.icon];
         if (!skey || !drawSprite(ctx, skey, x, y, r * 1.85, r * 1.85)) {
           ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';

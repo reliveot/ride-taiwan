@@ -224,7 +224,17 @@
     item_water: 'images/item_water.png',
     item_onigiri: 'images/item_onigiri.png',
     prop_sakura: 'images/prop_sakura.png',
-    prop_palm: 'images/prop_palm.png'
+    prop_palm: 'images/prop_palm.png',
+    bg_harbor_river: 'images/bg_harbor_river.jpg',
+    bg_coast_ocean: 'images/bg_coast_ocean.jpg',
+    bg_mountain_inland: 'images/bg_mountain_inland.jpg',
+    bg_town_paddy: 'images/bg_town_paddy.jpg',
+    item_shaved_ice: 'images/item_shaved_ice.png',
+    item_pastry: 'images/item_pastry.png',
+    item_soup: 'images/item_soup.png',
+    item_meatball: 'images/item_meatball.png',
+    item_tea: 'images/item_tea.png',
+    item_mochi: 'images/item_mochi.png'
   };
 
   global.RideTaiwanData = {
