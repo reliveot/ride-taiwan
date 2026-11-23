@@ -70,6 +70,9 @@
     lowMotion: false,
     steeringMode: 'smooth',
     steerInput: 0,
+    steerVel: 0,
+    stoppedAtCorridor: false,
+    corridorTransition: 0,
     touchMode: 'hold',
     thresholdDeg: 16,
     localGyroActive: false,
@@ -289,6 +292,10 @@
     state.boostCooldown = 0;
     state.bumpTimer = 0;
     state.followingCyclist = false;
+    state.steerInput = 0;
+    state.steerVel = 0;
+    state.stoppedAtCorridor = false;
+    state.corridorTransition = 0;
     state.stoppedAtConstruction = false;
     state.constructionWaitSec = 0;
     state.cyclistCooldown = 5;
@@ -421,13 +428,19 @@
         state.waveQueue.push({ template: 'collect', lane, item, tight: true });
       }
       state.lastSpecialType = '';
-    } else if (roll < 0.38) {
-      // Continuous diagonal puddle/gravel stream (fun to weave around in smooth mode!)
-      const dir = r() < 0.5 ? 1 : -1;
-      const lanes = dir === 1 ? [-1, 0, 1] : [1, 0, -1];
-      lanes.forEach((bl) => {
-        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [bl], tight: true });
-      });
+    } else if (roll < 0.42) {
+      // Randomized consecutive puddle/gravel stream with guaranteed reachable safe lane!
+      const steps = state.level === 'L2' ? 3 : 4;
+      let safe = Math.floor(r() * 3) - 1;
+      for (let i = 0; i < steps; i++) {
+        // Pick next reachable safe lane (step at most 1 lane so it's always passable!)
+        const choices = [-1, 0, 1].filter((l) => Math.abs(l - safe) <= 1);
+        safe = choices[Math.floor(r() * choices.length)];
+        const blockCount = (state.level === 'L2' && r() < 0.5) ? 1 : 2;
+        const others = [-1, 0, 1].filter((l) => l !== safe);
+        const blocked = blockCount === 2 ? others : [others[Math.floor(r() * others.length)]];
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: blocked, tight: true });
+      }
       state.lastSpecialType = '';
     } else if (roll < 0.58) {
       const steps = state.level === 'L5' ? 5 : (state.level === 'L4' ? 4 : 3);
@@ -571,7 +584,7 @@
       state.clouds.forEach((c) => { c.x = (c.x + dt * 0.012 * c.s) % 1.15; });
     }
 
-    const drainRate = state.stoppedAtConstruction ? 0.8 : 2.0;
+    const drainRate = (state.stoppedAtConstruction || state.stoppedAtCorridor) ? 0.8 : (state.throttle === 1 ? 4.5 : 3.2);
     state.stamina = Math.max(0, state.stamina - drainRate * dt);
 
     if (state.mode === 'timed' && state.elapsedSec >= state.timedMinutes * 60) { endGame('timeup'); return; }
@@ -583,8 +596,10 @@
 
     const prevX = state.bikeXNorm;
     if (state.steeringMode === 'smooth') {
-      state.bikeXNorm = Math.max(-1.05, Math.min(1.05, state.bikeXNorm + state.steerInput * 1.95 * dt));
-      state.bikeLean = state.lowMotion ? 0 : state.steerInput * 0.16;
+      const targetVel = state.steerInput * 1.35;
+      state.steerVel += (targetVel - state.steerVel) * Math.min(1, dt * 10);
+      state.bikeXNorm = Math.max(-1.05, Math.min(1.05, state.bikeXNorm + state.steerVel * dt));
+      state.bikeLean = state.lowMotion ? 0 : state.steerVel * 0.14;
       state.lane = state.bikeXNorm < -0.34 ? -1 : (state.bikeXNorm > 0.34 ? 1 : 0);
     } else {
       state.bikeXNorm += (state.lane - state.bikeXNorm) * Math.min(1, dt * 13);
@@ -617,7 +632,7 @@
       if (inDanger) speedMult *= 0.68;
     }
 
-    if (state.stoppedAtConstruction) speedMult = 0;
+    if (state.stoppedAtConstruction || state.stoppedAtCorridor) speedMult = 0;
     else if (state.followingCyclist) speedMult = Math.min(speedMult, 0.48);
     else if (state.bumpTimer > 0) speedMult *= 0.80;
     else if (state.boostTimer > 0) speedMult *= 1.20;
@@ -721,7 +736,11 @@
             if (state.lane === ev.safeLane || state.constructionWaitSec >= 6.0) {
               if (state.constructionWaitSec >= 6.0) showBanner('👷 辛苦了！工作人員幫您開便道通過～', '');
               else { hideBanner(); recordEventOutcome(true, ev.safeLane); }
-              state.stoppedAtConstruction = false;
+              state.steerInput = 0;
+    state.steerVel = 0;
+    state.stoppedAtCorridor = false;
+    state.corridorTransition = 0;
+    state.stoppedAtConstruction = false;
               state.events.splice(i, 1);
             }
           }
@@ -769,25 +788,37 @@
       }
 
       if (ev.template === 'corridor') {
-        ev.z = Math.max(0.14, ev.z - approachRate * dt);
-        if (ev.z <= 0.22) {
-          ev.segProgress += dt * 0.95;
-          if (state.lane !== ev.seq[ev.segIndex]) ev.failed = true;
-          if (ev.segProgress >= 1.0) {
-            ev.segProgress = 0;
-            ev.segIndex += 1;
-            if (ev.segIndex >= ev.seq.length) {
-              hideBanner();
-              if (!ev.failed) {
+        // 1.5s gradual narrowing transition before enforcing single lane
+        state.corridorTransition = Math.min(1, state.corridorTransition + dt / 1.5);
+        const targetLane = ev.seq[ev.segIndex];
+        const dirName = targetLane === -1 ? '左側' : (targetLane === 0 ? '中央' : '右側');
+
+        if (state.corridorTransition < 1) {
+          showBanner('⚠️ 道路縮減中！請移至' + dirName + '安全車道', 'warn');
+          ev.z = Math.max(0.14, ev.z - approachRate * 0.4 * dt);
+        } else {
+          const inSafe = Math.abs(state.bikeXNorm - targetLane) < 0.45;
+          if (!inSafe) {
+            state.stoppedAtCorridor = true;
+            showBanner('🛑 路已縮減！請切入' + dirName + '車道才可前進', 'warn');
+          } else {
+            state.stoppedAtCorridor = false;
+            showBanner('🛣️ 沿著' + dirName + '安全車道前進中 (' + (ev.segIndex + 1) + '/' + ev.seq.length + ')', 'boost');
+            ev.segProgress += dt * 0.85;
+            if (ev.segProgress >= 1.0) {
+              ev.segProgress = 0;
+              ev.segIndex += 1;
+              if (ev.segIndex >= ev.seq.length) {
+                state.stoppedAtCorridor = false;
+                state.corridorTransition = 0;
+                hideBanner();
                 recordEventOutcome(true, state.lane);
                 state.boostTimer = 1.0;
                 state.accelCount += 1;
                 AudioFX.playBoost();
                 spawnFeedback(state.lane, '✨ 單線通道通過！加速 1 秒', '#0f766e');
-              } else {
-                recordEventOutcome(false, state.lane);
+                state.events.splice(i, 1);
               }
-              state.events.splice(i, 1);
             }
           }
         }
@@ -980,9 +1011,14 @@
     if (activeCorridor) {
       const safeLane = activeCorridor.seq[activeCorridor.segIndex];
       const laneOffsets = { '-1': [-0.5, -0.165], '0': [-0.165, 0.165], '1': [0.165, 0.5] };
-      const [fL, fR] = laneOffsets[String(safeLane)];
+      const [tL, tR] = laneOffsets[String(safeLane)];
+      const tr = state.corridorTransition;
+      // Smoothly interpolate road edges from full [-0.5, +0.5] down to [tL, tR]!
+      const fL = -0.5 + (tL - (-0.5)) * tr;
+      const fR = 0.5 + (tR - 0.5) * tr;
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.08)';
+      // Fading closed road area
+      ctx.fillStyle = 'rgba(15, 23, 42, ' + (0.35 * (1 - tr)).toFixed(2) + ')';
       ctx.beginPath();
       ctx.moveTo(topCX - roadTopW * 0.5, horizonY); ctx.lineTo(topCX + roadTopW * 0.5, horizonY);
       ctx.lineTo(botCX + roadBotW * 0.5, h); ctx.lineTo(botCX - roadBotW * 0.5, h);
@@ -993,7 +1029,7 @@
       ctx.moveTo(topCX + roadTopW * fL, horizonY); ctx.lineTo(topCX + roadTopW * fR, horizonY);
       ctx.lineTo(botCX + roadBotW * fR, h); ctx.lineTo(botCX + roadBotW * fL, h);
       ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 4; ctx.stroke();
+      ctx.strokeStyle = tr < 1 ? '#f59e0b' : '#22c55e'; ctx.lineWidth = 4; ctx.stroke();
 
       ctx.fillStyle = 'rgba(74, 222, 128, 0.75)';
       for (let i = 0; i < 4; i++) {
