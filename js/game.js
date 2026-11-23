@@ -561,6 +561,14 @@
     return LANDMARKS[idx % LANDMARKS.length] || LANDMARKS[0];
   }
 
+  function pickSnack() {
+    if (state.snackStyle === 'local') {
+      const lm = getActiveStationObj(state.curStationIdx);
+      if (lm && lm.localSnack) return lm.localSnack;
+    }
+    return COLLECTIBLES[Math.floor(state.rng() * COLLECTIBLES.length)];
+  }
+
   // --- Stage Director & 5-Level Event Pattern Generator ---
   function enqueueWavePattern() {
     const r = state.rng;
