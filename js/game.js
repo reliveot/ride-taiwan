@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  const { LANDMARKS, SPRINT_ROUTES, COLLECTIBLES, BUMP_SKINS, CYCLIST_SKINS, UNITS_PER_STATION } = window.RideTaiwanData;
+  const { LANDMARKS, PENGHU_SPECIAL, SPRINT_ROUTES, COLLECTIBLES, BUMP_SKINS, CYCLIST_SKINS, BIKES, CHARACTERS, UNITS_PER_STATION } = window.RideTaiwanData;
   const { TiltSensorEngine, RehabLink, requestWakeLock } = window.TiltRehabKit;
   const AudioFX = window.RehabAudio;
   const STORAGE_KEY = 'rtw_v2_save_data';
@@ -68,6 +68,21 @@
     speedControl: 'auto',
     safetyAssist: true,
     lowMotion: false,
+    bikeId: 'ubike',
+    charId: 'ming',
+    corridorSnackTimer: 0,
+    corridorWaitSec: 0,
+    firstTryTotal: 0,
+    firstTrySuccess: 0,
+    assistedCount: 0,
+    snacksEaten: 0,
+    consecutiveHits: 0,
+    hasMovedSinceSpawn: false,
+    bridgeStartDist: -1,
+    bridgeEndDist: -1,
+    pendingPostcardIdx: -1,
+    directorSegIdx: 0,
+    directorPlan: [],
     snackStyle: 'local',
     steeringMode: 'smooth',
     steerInput: 0,
@@ -159,10 +174,56 @@
     if (v === 'home') refreshHomeStats();
   }
 
+  function renderGarage() {
+    const bikeGrid = $('bikeGrid');
+    const charGrid = $('charGrid');
+    if (!bikeGrid || !charGrid) return;
+
+    bikeGrid.innerHTML = '';
+    BIKES.forEach((bk) => {
+      const unlocked = saveData.tourUnits >= bk.unlockDist;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip' + (state.bikeId === bk.id ? ' selected' : '');
+      if (!unlocked) btn.style.opacity = '0.58';
+      btn.innerHTML = '<div style="font-size:1.3rem;">' + bk.icon + '</div><div>' + bk.name.split(' ')[0] + '</div>' +
+        '<div style="font-size:0.65rem;color:' + (unlocked ? '#0f766e' : '#dc2626') + ';">' +
+        (unlocked ? bk.tag : '🔒 需 ' + bk.unlockDist + ' 里程') + '</div>';
+      btn.addEventListener('click', () => {
+        if (unlocked) {
+          state.bikeId = bk.id;
+          renderGarage();
+        } else {
+          $('bikeDescText').textContent = '🔒 尚未解鎖「' + bk.name + '」：累計騎乘達 ' + bk.unlockDist + ' 單位即可解鎖！（目前 ' + saveData.tourUnits + '）';
+        }
+      });
+      bikeGrid.appendChild(btn);
+    });
+    const curBike = BIKES.find((b) => b.id === state.bikeId) || BIKES[0];
+    $('bikeDescText').textContent = curBike.icon + ' ' + curBike.name + '｜' + curBike.desc;
+
+    charGrid.innerHTML = '';
+    CHARACTERS.forEach((ch) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip' + (state.charId === ch.id ? ' selected' : '');
+      btn.innerHTML = '<div style="font-size:1.25rem;">' + ch.icon + '</div><div>' + ch.name + '</div><div style="font-size:0.65rem;color:#64748b;">' + ch.role + '</div>';
+      btn.addEventListener('click', () => {
+        state.charId = ch.id;
+        renderGarage();
+      });
+      charGrid.appendChild(btn);
+    });
+  }
+
   function refreshHomeStats() {
     $('openAlbumBtn').textContent = '📖 景點收藏冊 (' + saveData.unlockedIds.length + ' / ' + LANDMARKS.length + ')';
     const loopPct = Math.round(((saveData.tourUnits % (UNITS_PER_STATION * LANDMARKS.length)) / (UNITS_PER_STATION * LANDMARKS.length)) * 100);
     $('homeTourBadge').textContent = '第 ' + (saveData.loopsCompleted + 1) + ' 圈 ' + loopPct + '%';
+    if ($('homeTotalDistText')) {
+      $('homeTotalDistText').textContent = '累計總里程：' + saveData.tourUnits + ' 單位 · 已收集 ' + saveData.unlockedIds.length + ' / ' + LANDMARKS.length + ' 站';
+    }
+    renderGarage();
   }
 
   function updateConnectionUI() {
@@ -249,6 +310,7 @@
     const clamped = newLane < 0 ? -1 : (newLane > 0 ? 1 : 0);
     if (clamped !== state.lane) {
       state.lane = clamped;
+      state.hasMovedSinceSpawn = true;
       if (state.running && !state.paused) AudioFX.playLaneSwitch();
     }
     document.querySelectorAll('.lane-btn').forEach((b) => {
@@ -330,6 +392,18 @@
     state.stopCount = 0;
     state.newUnlockedThisRun = [];
     state.completedStationsCount = 0;
+    state.corridorWaitSec = 0;
+    state.firstTryTotal = 0;
+    state.firstTrySuccess = 0;
+    state.assistedCount = 0;
+    state.snacksEaten = 0;
+    state.consecutiveHits = 0;
+    state.hasMovedSinceSpawn = false;
+    state.bridgeStartDist = -1;
+    state.bridgeEndDist = -1;
+    state.pendingPostcardIdx = -1;
+    state.directorSegIdx = 0;
+    state.directorPlan = buildDirectorPlan(startLm);
 
     state.events = [];
     state.waveQueue = [];
@@ -372,8 +446,8 @@
       saveData.loopsCompleted = Math.floor(saveData.tourUnits / loopTotal);
     }
 
-    const successRate = state.eventsTotal > 0 ? Math.round((state.eventsSuccess / state.eventsTotal) * 100) : 100;
-    const condKey = [state.mode, state.mode === 'sprint' ? state.sprintRouteId : state.timedMinutes, state.level, state.controlMethod, state.speedControl, state.safetyAssist].join('|');
+    const successRate = state.firstTryTotal > 0 ? Math.round((state.firstTrySuccess / state.firstTryTotal) * 100) : 100;
+    const condKey = [state.mode, state.mode === 'sprint' ? state.sprintRouteId : state.timedMinutes, state.level, state.bikeId, state.controlMethod, state.speedControl, state.safetyAssist].join('|');
 
     const record = {
       id: Date.now(),
@@ -396,6 +470,7 @@
       accelCount: state.accelCount,
       decelCount: state.decelCount,
       stopCount: state.stopCount,
+      assistedCount: state.assistedCount,
       reason
     };
 
@@ -417,53 +492,85 @@
     showSummaryModal(record, isBest, sameCond.length > 0);
   }
 
-  // --- 5-Level Choreographed Wave & Cooldown Spawner ---
-  function pickSnack() {
-    if (state.snackStyle === 'local') {
-      const lm = LANDMARKS[state.curStationIdx] || LANDMARKS[0];
-      if (lm && lm.localSnack) return lm.localSnack;
-    }
-    return COLLECTIBLES[Math.floor(state.rng() * COLLECTIBLES.length)];
-  }
-
+  // --- Stage Director & 5-Level Event Pattern Generator ---
   function enqueueWavePattern() {
     const r = state.rng;
     const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
-    const roll = r();
+    const stationProgress = (state.distance % UNITS_PER_STATION) / UNITS_PER_STATION;
+    const seg = state.directorPlan.find((p) => stationProgress <= p.pEnd) || { type: 'open_cruise' };
+    state.hasMovedSinceSpawn = false;
 
-    // L1: Gentle single collectibles or 1-lane puddles
+    // L5 Mercy Recovery after 2 consecutive hits
+    if (state.consecutiveHits >= 2) {
+      state.consecutiveHits = 0;
+      state.waveQueue.push({ template: 'collect', lane: Math.floor(r() * 3) - 1, item: pickSnack() });
+      return;
+    }
+
+    // Open Cruise or Open Stamp: low-density scenic riding
+    if (seg.type === 'open_cruise' || seg.type === 'open_stamp') {
+      const sideLane = r() < 0.5 ? -1 : 1;
+      state.waveQueue.push({ template: 'collect', lane: sideLane, item: pickSnack() });
+      return;
+    }
+
+    // Terrain Feature: Bridge Shadow Zone or Single-Lane Corridor
+    if (seg.type === 'terrain_feature') {
+      const curLm = getActiveStationObj(state.curStationIdx);
+      if ((curLm.biome === 'river_left' || curLm.biome === 'oldtown_asym') && state.bridgeEndDist < state.distance && r() < 0.55) {
+        state.bridgeStartDist = state.distance + 450;
+        state.bridgeEndDist = state.distance + 1350;
+        state.waveQueue.push({ template: 'collect', lane: Math.floor(r() * 3) - 1, item: pickSnack() });
+        return;
+      }
+      if (state.lastSpecialType !== 'construction') {
+        const segCount = cfg.segs;
+        const seq = [];
+        let cur = Math.floor(r() * 3) - 1;
+        for (let i = 0; i < segCount; i++) {
+          seq.push(cur);
+          const nextChoices = [-1, 0, 1].filter((l) => Math.abs(l - cur) <= 1);
+          cur = nextChoices[Math.floor(r() * nextChoices.length)];
+        }
+        state.waveQueue.push({ template: 'corridor', seq });
+        state.lastSpecialType = 'corridor';
+        return;
+      }
+    }
+
+    // L1: Active Operation Required (Side snacks + Center-lane puddle so staying motionless doesn't score!)
     if (!cfg.allowWave) {
-      if (roll < 0.45) {
-        const item = pickSnack();
-        const lane = r() < 0.5 ? -1 : 1;
-        state.waveQueue.push({ template: 'collect', lane, item });
+      if (r() < 0.55) {
+        const sideLane = r() < 0.5 ? -1 : 1;
+        state.waveQueue.push({ template: 'collect', lane: sideLane, item: pickSnack() });
       } else {
-        const safeLane = r() < 0.5 ? -1 : 1;
-        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-safeLane] });
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [0], requireActive: true });
       }
       state.lastSpecialType = '';
       return;
     }
 
-    // L2-L5: Mix collectibles, 2-lane waves, cyclist (15s CD), construction (20s CD), corridor (mutex with construction)
-    if (roll < (state.stamina < 50 ? 0.50 : 0.28)) {
-      const item = pickSnack();
-      const startLane = Math.floor(r() * 3) - 1;
-      const dir = startLane === -1 ? 1 : (startLane === 1 ? -1 : (r() < 0.5 ? 1 : -1));
-      const count = state.level === 'L2' ? 2 : 4;
-      for (let i = 0; i < count; i++) {
-        const lane = Math.max(-1, Math.min(1, startLane + (i >= 2 ? dir : 0)));
-        state.waveQueue.push({ template: 'collect', lane, item, tight: true });
-      }
-      state.lastSpecialType = '';
-    } else if (roll < 0.46) {
+    // L4 & L5 Choice Dilemma (Snack vs Cyclist vs Safe Road simultaneously!)
+    const roll = r();
+    if ((state.level === 'L4' || state.level === 'L5') && roll < 0.28 && state.cyclistCooldown <= 0) {
+      state.cyclistCooldown = 15;
+      const lanes = [-1, 0, 1];
+      const snackL = lanes.splice(Math.floor(r() * lanes.length), 1)[0];
+      const cycL = lanes.splice(Math.floor(r() * lanes.length), 1)[0];
+      state.waveQueue.push({ template: 'collect', lane: snackL, item: pickSnack(), tight: true });
+      state.waveQueue.push({ template: 'obstacle', kind: 'cyclist', lane: cycL, tight: true });
+      state.lastSpecialType = 'cyclist';
+      return;
+    }
+
+    if (roll < 0.48) {
       const steps = state.level === 'L2' ? 3 : 4;
       const puddleLane = Math.floor(r() * 3) - 1;
       for (let i = 0; i < steps; i++) {
         state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [puddleLane], tight: true });
       }
       state.lastSpecialType = '';
-    } else if (roll < 0.60) {
+    } else if (roll < 0.68) {
       const steps = state.level === 'L5' ? 3 : 2;
       let safe = Math.floor(r() * 3) - 1;
       for (let i = 0; i < steps; i++) {
@@ -472,35 +579,17 @@
         state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== safe), tight: false });
       }
       state.lastSpecialType = '';
-    } else if (roll < 0.72 && cfg.allowCyclist && state.cyclistCooldown <= 0) {
+    } else if (roll < 0.82 && cfg.allowCyclist && state.cyclistCooldown <= 0) {
       state.cyclistCooldown = 15;
-      const safe1 = r() < 0.5 ? -1 : 1;
-      state.waveQueue.push({ template: 'obstacle', kind: 'cyclist', lane: safe1, tight: true });
-      if (state.level === 'L4' || state.level === 'L5') {
-        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== -safe1), tight: true });
-      }
+      state.waveQueue.push({ template: 'obstacle', kind: 'cyclist', lane: Math.floor(r() * 3) - 1, tight: true });
       state.lastSpecialType = 'cyclist';
-    } else if (roll < 0.85 && cfg.allowConstr && state.constructionCooldown <= 0 && state.lastSpecialType !== 'corridor') {
+    } else if (cfg.allowConstr && state.constructionCooldown <= 0 && state.lastSpecialType !== 'corridor') {
       state.constructionCooldown = 20;
-      const boostLane = Math.floor(r() * 3) - 1;
-      state.waveQueue.push({ template: 'boostpad', lane: boostLane, tight: true });
       const safeLane = Math.floor(r() * 3) - 1;
       state.waveQueue.push({ template: 'obstacle', kind: 'construction', safeLane, blockedLanes: [-1, 0, 1].filter((l) => l !== safeLane) });
       state.lastSpecialType = 'construction';
-    } else if (state.lastSpecialType !== 'construction') {
-      const segCount = cfg.segs;
-      const seq = [];
-      let cur = Math.floor(r() * 3) - 1;
-      for (let i = 0; i < segCount; i++) {
-        seq.push(cur);
-        const nextChoices = [-1, 0, 1].filter((l) => Math.abs(l - cur) <= 1);
-        cur = nextChoices[Math.floor(r() * nextChoices.length)];
-      }
-      state.waveQueue.push({ template: 'corridor', seq });
-      state.lastSpecialType = 'corridor';
     } else {
-      const safe = Math.floor(r() * 3) - 1;
-      state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== safe) });
+      state.waveQueue.push({ template: 'collect', lane: Math.floor(r() * 3) - 1, item: pickSnack() });
       state.lastSpecialType = '';
     }
   }
@@ -527,12 +616,14 @@
         state.events.push({ template: 'obstacle', kind: 'bump', blockedLanes: next.blockedLanes, skin: bSkin, z: initialZ, resolved: false, tight: !!next.tight });
       }
     } else if (next.template === 'corridor') {
+      state.events = [];
       state.corridorCurL = -0.5;
       state.corridorCurR = 0.5;
       state.corridorInitSec = 0;
-    state.corridorExiting = false;
-    state.corridorExitSec = 0;
+      state.corridorExiting = false;
+      state.corridorExitSec = 0;
       state.corridorTransition = 0;
+      state.corridorSnackTimer = 0.8;
       state.events.push({ template: 'corridor', seq: next.seq, segIndex: 0, segProgress: 0, failed: false, z: initialZ });
       showBanner('⚠️ 前方道路縮減！請準備進入安全車道', 'warn');
     }
@@ -547,24 +638,34 @@
 
   function hideBanner() { $('eventBanner').classList.add('hidden'); }
 
-  function recordEventOutcome(success, laneHint) {
+  function recordEventOutcome(success, laneHint, isFirstTry = true, isActive = true) {
     state.eventsTotal += 1;
+    if (isFirstTry) {
+      state.firstTryTotal += 1;
+      if (success && isActive) state.firstTrySuccess += 1;
+    } else {
+      state.assistedCount += 1;
+    }
     if (laneHint === -1) { state.leftTotal += 1; if (success) state.leftSuccess += 1; }
     else if (laneHint === 1) { state.rightTotal += 1; if (success) state.rightSuccess += 1; }
 
     if (success) {
-      state.eventsSuccess += 1;
-      state.combo += 1;
-      if (state.combo > state.maxCombo) state.maxCombo = state.combo;
-      if (state.combo % 3 === 0 && state.boostCooldown <= 0) {
-        state.boostTimer = 1.0;
-        state.boostCooldown = 5.0;
-        state.accelCount += 1;
-        AudioFX.playBoost();
-        showBanner('🔥 連擊 ' + state.combo + '！順風加速 1 秒！', 'boost');
+      state.consecutiveHits = 0;
+      if (isActive && isFirstTry) {
+        state.eventsSuccess += 1;
+        state.combo += 1;
+        if (state.combo > state.maxCombo) state.maxCombo = state.combo;
+        if (state.combo % 3 === 0 && state.boostCooldown <= 0) {
+          state.boostTimer = 1.0;
+          state.boostCooldown = 5.0;
+          state.accelCount += 1;
+          AudioFX.playBoost();
+          showBanner('🔥 連擊 ' + state.combo + '！順風加速 1 秒！', 'boost');
+        }
       }
     } else {
       state.combo = 0;
+      state.consecutiveHits += 1;
     }
   }
 
@@ -586,7 +687,12 @@
   }
 
   function triggerPassingLandmark(idx) {
-    const lm = LANDMARKS[idx];
+    const obsClose = state.events.some((e) => e.template === 'obstacle' && e.z < 0.45);
+    if (obsClose) {
+      state.pendingPostcardIdx = idx;
+      return;
+    }
+    const lm = getActiveStationObj(idx);
     if (!lm) return;
     if (!saveData.unlockedIds.includes(lm.id)) {
       saveData.unlockedIds.push(lm.id);
@@ -621,7 +727,11 @@
       state.clouds.forEach((c) => { c.x = (c.x + dt * 0.012 * c.s) % 1.15; });
     }
 
-    const drainRate = (state.stoppedAtConstruction || state.stoppedAtCorridor) ? 0.5 : (state.throttle === 1 ? 2.4 : 1.4);
+    const curBike = BIKES.find((b) => b.id === state.bikeId) || BIKES[0];
+    const minIdx = Math.floor(state.elapsedSec / 60);
+    const baseFormula = 0.55 + 0.08 * minIdx;
+    const actionMult = (state.stoppedAtConstruction || state.stoppedAtCorridor) ? 0.4 : (state.throttle === 1 ? 1.4 : 1.0);
+    const drainRate = baseFormula * curBike.drainMult * actionMult;
     state.stamina = Math.max(0, state.stamina - drainRate * dt);
 
     if (state.mode === 'timed' && state.elapsedSec >= state.timedMinutes * 60) { endGame('timeup'); return; }
@@ -637,6 +747,7 @@
       state.steerVel += (targetVel - state.steerVel) * Math.min(1, dt * 10);
       state.bikeXNorm = Math.max(-1.05, Math.min(1.05, state.bikeXNorm + state.steerVel * dt));
       state.bikeLean = state.lowMotion ? 0 : state.steerVel * 0.14;
+      if (Math.abs(state.steerVel) > 0.15) state.hasMovedSinceSpawn = true;
       state.lane = state.bikeXNorm < -0.34 ? -1 : (state.bikeXNorm > 0.34 ? 1 : 0);
     } else {
       state.bikeXNorm += (state.lane - state.bikeXNorm) * Math.min(1, dt * 13);
@@ -659,7 +770,7 @@
 
     const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
     const spdScale = state.baseSpeedLevel === 'slow' ? 0.85 : (state.baseSpeedLevel === 'fast' ? 1.18 : 1.0);
-    const baseSpd = cfg.speed * spdScale;
+    const baseSpd = cfg.speed * spdScale * curBike.speedMult;
     const staminaFactor = 0.55 + 0.45 * (state.stamina / 100);
     let speedMult = staminaFactor;
 
@@ -760,7 +871,9 @@
         ev.z -= approachRate * dt;
         if (!ev.resolved && ev.z <= 0.17 && Math.abs(state.bikeXNorm - ev.lane) < 0.42) {
           ev.resolved = true;
-          state.stamina = Math.min(100, state.stamina + ev.item.stamina);
+          state.snacksEaten += 1;
+          const heal = state.mode === 'endurance' ? Math.max(4, Math.round(ev.item.stamina - state.snacksEaten * 0.45)) : ev.item.stamina;
+          state.stamina = Math.min(100, state.stamina + heal);
           state.collectedCount += 1;
           AudioFX.playCollect();
           spawnFeedback(ev.lane, '+' + ev.item.stamina + '% 體力 ' + ev.item.icon, ev.item.color);
@@ -813,7 +926,7 @@
               showBanner((ev.skin ? ev.skin.icon : '🚴') + ' 被' + lbl + '擋住了！請換道超車', 'warn');
             } else if (ev.z <= 0.04 && !ev.resolved) {
               ev.resolved = true;
-              recordEventOutcome(true, state.lane);
+              recordEventOutcome(true, state.lane, true, state.level !== 'L1' || state.hasMovedSinceSpawn);
               state.events.splice(i, 1);
             }
           } else if (state.lane !== ev.lane) {
@@ -835,7 +948,7 @@
             AudioFX.playBump();
             spawnFeedback(state.lane, '💦 顛簸減速 1 秒', '#dc2626');
           } else {
-            recordEventOutcome(true, state.lane);
+            recordEventOutcome(true, state.lane, true, state.level !== 'L1' || state.hasMovedSinceSpawn);
           }
         }
         if (ev.z <= 0.02) state.events.splice(i, 1);
@@ -874,10 +987,28 @@
           const inSafe = Math.abs(state.bikeXNorm - curCenterLane) < 0.58;
           if (!inSafe) {
             state.stoppedAtCorridor = true;
-            showBanner('🛑 路已縮減！請切入' + dirName + '車道才可前進', 'warn');
+            state.corridorWaitSec += dt;
+            if (state.corridorWaitSec >= 6.0) {
+              state.stoppedAtCorridor = false;
+              state.corridorWaitSec = 0;
+              state.corridorExiting = true;
+              state.corridorExitSec = 0;
+              recordEventOutcome(false, state.lane, false, false);
+              showBanner('👷 辛苦了！已開啟便道協助通過', '');
+            } else if (state.corridorWaitSec >= 3.0) {
+              showBanner('👉👉 請往' + dirName + '移動！(' + Math.ceil(6 - state.corridorWaitSec) + '秒後協助放行)', 'warn');
+            } else {
+              showBanner('🛑 路已縮減！請切入' + dirName + '車道才可前進', 'warn');
+            }
           } else {
+            state.corridorWaitSec = 0;
             state.stoppedAtCorridor = false;
             showBanner('🛣️ 順著單線彎道前進 (' + (ev.segIndex + 1) + '/' + ev.seq.length + ' → ' + dirName + ')', 'boost');
+            state.corridorSnackTimer -= dt;
+            if (state.corridorSnackTimer <= 0) {
+              state.corridorSnackTimer = 1.6;
+              state.events.push({ template: 'collect', lane: targetLane, item: pickSnack(), z: 0.95, resolved: false });
+            }
             ev.segProgress += dt * 0.36;
             if (ev.segProgress >= 1.0) {
               ev.segProgress = 0;
@@ -886,7 +1017,7 @@
                 state.stoppedAtCorridor = false;
                 state.corridorExiting = true;
                 state.corridorExitSec = 0;
-                recordEventOutcome(true, state.lane);
+                recordEventOutcome(true, state.lane, true, state.level !== 'L1' || state.hasMovedSinceSpawn);
                 state.boostTimer = 1.0;
                 state.accelCount += 1;
                 AudioFX.playBoost();
@@ -912,7 +1043,7 @@
   }
 
   function updateHUD() {
-    const idx = getCurrentStationIndex();
+    const idx = state.curStationIdx;
     const lm = LANDMARKS[idx] || LANDMARKS[0];
     $('hudStageTitle').textContent = lm.icon + ' ' + lm.county + '路段 → ' + lm.name;
 
@@ -940,8 +1071,8 @@
   }
 
   function roadCenterX(depth, width) {
-    // Horizon shifts slightly less than bottom for natural 2.5D perspective
-    return width * (0.5 + state.roadOffset * (0.45 + 0.55 * (1 - depth)));
+    const curve = state.lowMotion ? 0 : Math.sin(state.distance * 0.0018) * 0.05 * depth;
+    return width * (0.5 + state.roadOffset * (0.45 + 0.55 * (1 - depth)) + curve);
   }
 
   function laneToScreenX(lane, depth, width) {
@@ -974,10 +1105,15 @@
 
     ctx.fillStyle = lerpHex(prevLm.theme.hillBack, lm.theme.hillBack, fade);
     ctx.beginPath();
-    ctx.moveTo(0, horizonY);
-    ctx.quadraticCurveTo(w * 0.25, horizonY - 50, w * 0.52, horizonY - 12);
-    ctx.quadraticCurveTo(w * 0.78, horizonY - 58, w, horizonY - 8);
-    ctx.lineTo(w, horizonY + 10); ctx.lineTo(0, horizonY + 10); ctx.closePath(); ctx.fill();
+    ctx.moveTo(0, horizonY + 10);
+    for (let sx = 0; sx <= w; sx += 24) {
+      const n = terrainNoise(state.distance * 0.35 + sx * 1.4);
+      const mh = 14 + n * 58;
+      ctx.lineTo(sx, horizonY - mh);
+    }
+    ctx.lineTo(w, horizonY + 10);
+    ctx.closePath();
+    ctx.fill();
 
     ctx.globalAlpha = fade;
     ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
@@ -1040,51 +1176,40 @@
   }
 
   // Asymmetric Biome Ground & Side Feature Painting!
-  function drawAsymmetricBiome(ctx, lm, w, h, horizonY, roadTopW, roadBotW) {
+  function drawAsymmetricBiome(ctx, lm, prevLm, fade, w, h, horizonY, roadTopW, roadBotW) {
     const topCX = roadCenterX(1, w);
     const botCX = roadCenterX(0, w);
 
-    ctx.fillStyle = lm.theme.ground;
+    ctx.fillStyle = lerpHex(prevLm.theme.ground, lm.theme.ground, fade);
     ctx.fillRect(0, horizonY, w, h - horizonY);
 
-    // Paint water/ocean/wetland/paddy on the expanded side!
-    if (lm.biome === 'river_left' || lm.biome === 'harbor_left') {
-      ctx.fillStyle = lm.biome === 'river_left' ? '#38bdf8' : '#0ea5e9';
-      ctx.beginPath();
-      ctx.moveTo(0, horizonY);
-      ctx.lineTo(topCX - roadTopW * 0.65, horizonY);
-      ctx.lineTo(botCX - roadBotW * 0.65, h);
-      ctx.lineTo(0, h);
-      ctx.closePath();
-      ctx.fill();
-    } else if (lm.biome === 'ocean_right' || lm.biome === 'wetland_right' || lm.biome === 'cliff_ocean' || lm.biome === 'paddy_ocean') {
-      ctx.fillStyle = lm.biome === 'wetland_right' ? '#fdba74' : '#0284c7';
-      ctx.beginPath();
-      ctx.moveTo(topCX + roadTopW * 0.65, horizonY);
-      ctx.lineTo(w, horizonY);
-      ctx.lineTo(w, h);
-      ctx.lineTo(botCX + roadBotW * 0.65, h);
-      ctx.closePath();
-      ctx.fill();
-      // White beach surf line
-      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(topCX + roadTopW * 0.68, horizonY);
-      ctx.lineTo(botCX + roadBotW * 0.68, h);
-      ctx.stroke();
-
-      if (lm.biome === 'cliff_ocean') {
-        // Left steep mountain wall
-        ctx.fillStyle = '#065f46';
+    const drawSide = (b, alpha) => {
+      if (alpha <= 0.02) return;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (b.biome === 'river_left' || b.biome === 'harbor_left') {
+        ctx.fillStyle = b.biome === 'river_left' ? '#38bdf8' : '#0ea5e9';
         ctx.beginPath();
-        ctx.moveTo(0, horizonY);
-        ctx.lineTo(topCX - roadTopW * 0.55, horizonY);
-        ctx.lineTo(0, h * 0.72);
-        ctx.closePath();
-        ctx.fill();
+        ctx.moveTo(0, horizonY); ctx.lineTo(topCX - roadTopW * 0.65, horizonY);
+        ctx.lineTo(botCX - roadBotW * 0.65, h); ctx.lineTo(0, h);
+        ctx.closePath(); ctx.fill();
+      } else if (b.biome === 'ocean_right' || b.biome === 'wetland_right' || b.biome === 'cliff_ocean' || b.biome === 'paddy_ocean') {
+        ctx.fillStyle = b.biome === 'wetland_right' ? '#fdba74' : '#0284c7';
+        ctx.beginPath();
+        ctx.moveTo(topCX + roadTopW * 0.65, horizonY); ctx.lineTo(w, horizonY);
+        ctx.lineTo(w, h); ctx.lineTo(botCX + roadBotW * 0.65, h);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(topCX + roadTopW * 0.68, horizonY); ctx.lineTo(botCX + roadBotW * 0.68, h); ctx.stroke();
+        if (b.biome === 'cliff_ocean') {
+          ctx.fillStyle = '#065f46';
+          ctx.beginPath(); ctx.moveTo(0, horizonY); ctx.lineTo(topCX - roadTopW * 0.55, horizonY); ctx.lineTo(0, h * 0.72); ctx.closePath(); ctx.fill();
+        }
       }
-    }
+      ctx.restore();
+    };
+    if (fade < 1) drawSide(prevLm, 1 - fade);
+    drawSide(lm, fade);
   }
 
   function renderScene() {
@@ -1092,8 +1217,8 @@
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
-    const lm = LANDMARKS[state.curStationIdx] || LANDMARKS[0];
-    const prevLm = LANDMARKS[state.prevStationIdx] || lm;
+    const lm = getActiveStationObj(state.curStationIdx);
+    const prevLm = getActiveStationObj(state.prevStationIdx);
     const fade = state.biomeFade;
     const th = lm.theme;
 
@@ -1107,7 +1232,7 @@
 
     const roadTopW = w * 0.20;
     const roadBotW = w * 0.76;
-    drawAsymmetricBiome(ctx, lm, w, h, horizonY, roadTopW, roadBotW);
+    drawAsymmetricBiome(ctx, lm, prevLm, fade, w, h, horizonY, roadTopW, roadBotW);
 
     const topCX = roadCenterX(1, w);
     const botCX = roadCenterX(0, w);
@@ -1158,9 +1283,8 @@
         const cx0 = roadCenterX(1 - p0, w), cx1 = roadCenterX(1 - p1, w);
         const half0 = (roadTopW + (roadBotW - roadTopW) * p0) * 0.5;
         const half1 = (roadTopW + (roadBotW - roadTopW) * p1) * 0.5;
-        [-0.33, 0.33].forEach((f) => {
-          ctx.beginPath(); ctx.moveTo(cx0 + half0 * f, y0); ctx.lineTo(cx1 + half1 * f, y1); ctx.stroke();
-        });
+        // Bike-path subtle single center dashed line
+        ctx.beginPath(); ctx.moveTo(cx0, y0); ctx.lineTo(cx1, y1); ctx.stroke();
       }
     }
 
@@ -1220,10 +1344,14 @@
         const y = horizonY + Math.pow(p, 1.45) * (h * 0.78 - horizonY);
         const x = laneToScreenX(ev.lane, ev.z, w);
         const r = 14 + p * 20;
-        ctx.fillStyle = '#ffffff'; ctx.strokeStyle = ev.item.color; ctx.lineWidth = 3.5;
+        ctx.save();
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.38)';
+        ctx.beginPath(); ctx.arc(x, y, r * 1.32, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fefce8'; ctx.strokeStyle = '#eab308'; ctx.lineWidth = 4;
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(ev.item.icon, x, y + 2);
+        ctx.restore();
       } else if (ev.template === 'obstacle') {
         const p = 1 - ev.z;
         const y = horizonY + Math.pow(p, 1.45) * (h * 0.78 - horizonY);
@@ -1232,13 +1360,17 @@
           const sk = ev.skin || BUMP_SKINS[0];
           ev.blockedLanes.forEach((bl) => {
             const x = laneToScreenX(bl, ev.z, w);
-            ctx.fillStyle = sk.bg;
+            ctx.save();
+            ctx.fillStyle = sk.bg || '#fee2e2';
+            ctx.strokeStyle = sk.border || '#ef4444';
+            ctx.lineWidth = 3;
             ctx.beginPath();
-            if (sk.ellipse) ctx.ellipse(x, y, r * 1.15, r * 0.55, 0, 0, Math.PI * 2);
-            else ctx.arc(x, y, r * 0.85, 0, Math.PI * 2);
-            ctx.fill();
+            if (sk.ellipse) ctx.ellipse(x, y, r * 1.15, r * 0.58, 0, 0, Math.PI * 2);
+            else ctx.arc(x, y, r * 0.9, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
             ctx.font = Math.round(r) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText(sk.icon, x, y);
+            ctx.restore();
           });
         } else if (ev.kind === 'cyclist') {
           const sk = ev.skin || CYCLIST_SKINS[0];
@@ -1262,6 +1394,12 @@
       }
     });
 
+    if (state.distance >= state.bridgeStartDist && state.distance <= state.bridgeEndDist) {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.36)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(0, horizonY - 46, w, 24);
+    }
     const bikeY = state.bumpTimer > 0 ? h * 0.81 + Math.sin(state.elapsedSec * 40) * 4 : h * 0.81;
     drawCyclist(ctx, laneToScreenX(state.bikeXNorm, 0.08, w), bikeY, state.bikeLean, state.pedalPhase);
 
@@ -1286,14 +1424,16 @@
     ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
     ctx.beginPath(); ctx.ellipse(0, 34, 28, 8, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.roundRect(-7, 4, 14, 32, 6); ctx.fill();
-    ctx.strokeStyle = '#0f766e'; ctx.lineWidth = 6;
+    const curBike = BIKES.find((b) => b.id === state.bikeId) || BIKES[0];
+    const curChar = CHARACTERS.find((c) => c.id === state.charId) || CHARACTERS[0];
+    ctx.strokeStyle = curBike.frameColor; ctx.lineWidth = 6;
     ctx.beginPath(); ctx.moveTo(0, 12); ctx.lineTo(0, -14); ctx.stroke();
     ctx.strokeStyle = '#334155'; ctx.lineWidth = 5;
     ctx.beginPath(); ctx.moveTo(-22, -22); ctx.lineTo(22, -22); ctx.stroke();
     const bob = state.stoppedAtConstruction ? 0 : Math.sin(pedalPhase) * 2;
-    ctx.fillStyle = '#ea580c'; ctx.beginPath(); ctx.roundRect(-16, -40 + bob, 32, 32, 11); ctx.fill();
-    ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.roundRect(-11, -36 + bob, 22, 22, 7); ctx.fill();
-    ctx.fillStyle = '#0d9488'; ctx.beginPath(); ctx.arc(0, -52 + bob, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = curChar.jersey; ctx.beginPath(); ctx.roundRect(-16, -40 + bob, 32, 32, 11); ctx.fill();
+    ctx.fillStyle = curChar.pack; ctx.beginPath(); ctx.roundRect(-11, -36 + bob, 22, 22, 7); ctx.fill();
+    ctx.fillStyle = curChar.helmet; ctx.beginPath(); ctx.arc(0, -52 + bob, 13, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
@@ -1511,6 +1651,7 @@
       b.addEventListener('click', () => {
         state.steeringMode = b.dataset.steer;
         document.querySelectorAll('[data-steer]').forEach((x) => x.classList.toggle('selected', x === b));
+        if ($('laneTouchConfigRow')) $('laneTouchConfigRow').classList.toggle('hidden', state.steeringMode !== 'lanes');
       });
     });
         document.querySelectorAll('[data-spdctrl]').forEach((b) => {

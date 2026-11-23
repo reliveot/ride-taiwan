@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>《騎遍台灣》V2.7 單車環島復健遊戲</title>
+  <title>《騎遍台灣》V3.0 單車環島復健遊戲</title>
   <link rel="stylesheet" href="css/style.css">
   <script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -11,60 +11,33 @@
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.7</span></div>
+      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V3.0</span></div>
       <div id="topActions" style="display:flex;align-items:center;gap:6px;">
         <span id="connStatusPill" class="pill sim">⌨️ 單機 / 觸控</span>
         <button id="muteBtn" class="icon-btn" type="button">🔊 音效</button>
       </div>
     </header>
 
-    <!-- 1. Home & Setup -->
+    <!-- 1. Game Lobby & Garage -->
     <main id="homeView" class="scroll-body">
       <section class="hero-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
           <h1>《騎遍台灣》單車環島</h1>
-          <span id="homeTourBadge" class="pill" style="background:rgba(255,255,255,0.2);color:#fff;border:none;">第 1 圈 0%</span>
+          <span id="homeTourBadge" class="pill" style="background:rgba(255,255,255,0.22);color:#fff;border:none;">第 1 圈 0%</span>
         </div>
-        <p>五級分級訓練 × 左右不對稱台灣路段 × 18 站環島蓋章<br>支援電腦鍵盤、手機分屏觸控、手機本機陀螺儀與雙裝置遙控。</p>
+        <p id="homeTotalDistText">累計總里程：0 單位 · 已收集 0 / 18 站</p>
       </section>
 
-      <button id="startGameBtn" class="primary-btn" type="button">🚴 開始環島騎乘</button>
-      <div class="btn-row-2">
-        <button id="openAlbumBtn" class="secondary-btn" type="button">📖 景點收藏冊 (0 / 18)</button>
-        <button id="openHistoryBtn" class="secondary-btn" type="button">📊 騎乘紀錄與匯出入</button>
-      </div>
-
-      <!-- Local Phone Gyroscope Quick Enable -->
+      <!-- Mode & Level Selection -->
       <section class="panel-card">
-        <div class="panel-title">
-          <span>🧭 手機直接傾斜遊玩（本機陀螺儀）</span>
-          <span id="localGyroBadge" class="pill">未啟用</span>
-        </div>
-        <div style="font-size:0.78rem;color:#475569;line-height:1.4;">用手機直接玩時，請先點擊下方按鈕授權動作感測器（或直接用遊戲畫面的左右半邊觸控）。</div>
-        <div class="btn-row-2">
-          <button id="enableLocalGyroBtn" class="secondary-btn" type="button">📡 啟用手機陀螺儀</button>
-          <button id="calibrateLocalGyroBtn" class="icon-btn" type="button" style="justify-content:center;">🎯 校正中立位置</button>
-        </div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;font-weight:700;cursor:pointer;">
-          <input id="localPitchToggle" type="checkbox"> 本機陀螺儀也啟用前後傾斜（前傾加速 / 後傾煞車）
-        </label>
-      </section>
-
-      <!-- Mode & 5-Level Rehab Grading -->
-      <section class="panel-card">
-        <div class="panel-title"><span>🏁 遊戲模式與五級難度設定</span></div>
-
-        <div class="setting-row">
-          <div class="setting-label"><span>賽制選擇</span></div>
-          <div class="chip-group">
-            <button type="button" class="chip selected" data-mode="timed">⏱️ 限時探索</button>
-            <button type="button" class="chip" data-mode="endurance">🔋 續航遠征</button>
-            <button type="button" class="chip" data-mode="sprint">🏆 路段衝線</button>
-          </div>
+        <div class="panel-title"><span>🏁 選擇賽制與難度</span></div>
+        <div class="chip-group">
+          <button type="button" class="chip selected" data-mode="timed">⏱️ 限時探索</button>
+          <button type="button" class="chip" data-mode="endurance">🔋 續航遠征</button>
+          <button type="button" class="chip" data-mode="sprint">🏆 路段衝線</button>
         </div>
 
         <div id="timedConfigRow" class="setting-row">
-          <div class="setting-label"><span>限時長度</span></div>
           <div class="chip-group">
             <button type="button" class="chip" data-mins="1">1 分鐘</button>
             <button type="button" class="chip selected" data-mins="2">2 分鐘</button>
@@ -73,16 +46,16 @@
         </div>
 
         <div id="sprintConfigRow" class="setting-row hidden">
-          <div class="setting-label"><span>固定衝線賽道（公平比對最佳時間）</span></div>
           <select id="sprintRouteSelect" style="padding:8px;border-radius:10px;border:1px solid #cbd5e1;font-weight:700;">
             <option value="west_coast">北中海線衝線（基隆 → 台中，7站）</option>
             <option value="south_east">南東山海衝線（台南 → 宜蘭，6站）</option>
-            <option value="full_island">全環島 18 站壯遊衝線</option>
+            <option value="penghu_island">🏝️ 離島特別篇：澎湖跨海大橋</option>
+            <option value="full_island">本島 17 站大環島衝線</option>
           </select>
         </div>
 
         <div class="setting-row">
-          <div class="setting-label"><span>五級難度分級（L1–L3 復健 / L4–L5 一般與街機）</span></div>
+          <div class="setting-label"><span>五級難度（L1–L3 復健 / L4–L5 街機）</span></div>
           <div class="chip-group" style="grid-template-columns:repeat(5,1fr);">
             <button type="button" class="chip selected" data-level="L1">L1<br><span style="font-size:0.66rem;color:#64748b;">啟動</span></button>
             <button type="button" class="chip" data-level="L2">L2<br><span style="font-size:0.66rem;color:#64748b;">穩定</span></button>
@@ -92,76 +65,120 @@
           </div>
           <div id="levelDescText" style="font-size:0.75rem;color:#0f766e;font-weight:700;">L1 啟動練習：速度慢、單一補給與避障，適合動作建立。</div>
         </div>
-
-        <div class="setting-row">
-          <div class="setting-label"><span>基礎車速微調（與事件頻率獨立）</span></div>
-          <div class="chip-group">
-            <button type="button" class="chip" data-basespd="slow">🐢 偏慢</button>
-            <button type="button" class="chip selected" data-basespd="medium">🚲 標準</button>
-            <button type="button" class="chip" data-basespd="fast">⚡ 偏快</button>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-label"><span>事件出現頻率</span></div>
-          <div class="chip-group">
-            <button type="button" class="chip" data-freq="low">稀疏</button>
-            <button type="button" class="chip selected" data-freq="medium">適中</button>
-            <button type="button" class="chip" data-freq="high">密集</button>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-label"><span>補給品外觀</span></div>
-          <div class="chip-group two-col">
-            <button type="button" class="chip selected" data-snack="local">各地特色小吃（推薦）</button>
-            <button type="button" class="chip" data-snack="basic">統一基礎（香蕉＋水壺）</button>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-label"><span>轉向手感模式</span></div>
-          <div class="chip-group two-col">
-            <button type="button" class="chip selected" data-steer="smooth">連續平滑位移（推薦）</button>
-            <button type="button" class="chip" data-steer="lanes">三車道定位（復健格狀）</button>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-label"><span>速度控制與螢幕觸控方式</span></div>
-          <div class="chip-group two-col">
-            <button type="button" class="chip selected" data-spdctrl="auto">自動巡航</button>
-            <button type="button" class="chip" data-spdctrl="manual">手動油門/煞車</button>
-          </div>
-          <div class="chip-group two-col" style="margin-top:4px;">
-            <button type="button" class="chip selected" data-touchmode="hold">按住左右半邊（放開回中）</button>
-            <button type="button" class="chip" data-touchmode="tap">點一下左右半邊切換</button>
-          </div>
-        </div>
-
-        <div style="display:flex;flex-direction:column;gap:6px;font-size:0.82rem;font-weight:700;">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input id="safetyAssistCheck" type="checkbox" checked> 安全輔助減速（接近障礙提前放慢）
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input id="lowMotionCheck" type="checkbox"> 低動態畫面（減少搖晃與速度線，手機傾斜推薦）
-          </label>
-        </div>
       </section>
 
-      <!-- Dual-Device Pairing -->
+      <!-- Bike & Character Garage -->
       <section class="panel-card">
-        <div class="panel-title"><span>📱 雙裝置遙控配對（手機遙控電腦）</span></div>
-        <div class="qr-box">
-          <div id="qrContainer"></div>
-          <div style="flex:1;min-width:150px;">
-            <div style="font-size:0.78rem;color:#64748b;font-weight:700;">配對房號</div>
-            <div id="roomCodeDisplay" class="room-code-big">----</div>
-            <div id="homeConnText" style="font-size:0.78rem;color:#475569;line-height:1.35;">等待手機掃描配對...</div>
+        <div class="panel-title"><span>🚲 車庫與角色選擇</span></div>
+        <div id="bikeGrid" class="chip-group"></div>
+        <div id="bikeDescText" style="font-size:0.76rem;color:#475569;font-weight:700;background:#f8fafc;padding:7px 10px;border-radius:10px;"></div>
+        <div class="setting-label" style="margin-top:2px;"><span>選擇騎手角色</span></div>
+        <div id="charGrid" class="chip-group"></div>
+      </section>
+
+      <button id="startGameBtn" class="primary-btn" type="button">🚴 開始環島出發！</button>
+      <div class="btn-row-2">
+        <button id="openAlbumBtn" class="secondary-btn" type="button">📖 景點收藏冊 (0 / 17)</button>
+        <button id="openHistoryBtn" class="secondary-btn" type="button">📊 騎乘紀錄與匯出入</button>
+      </div>
+
+      <!-- Collapsible Settings & Pairing Page -->
+      <details class="resource-drawer">
+        <summary>⚙️ 操控、速度與手機配對設定 ▾</summary>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
+          <!-- Local Gyro -->
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>🧭 手機直接傾斜遊玩（本機陀螺儀）</span>
+              <span id="localGyroBadge" class="pill">未啟用</span>
+            </div>
+            <div class="btn-row-2">
+              <button id="enableLocalGyroBtn" class="secondary-btn" type="button" style="font-size:0.82rem;padding:8px;">📡 啟用手機陀螺儀</button>
+              <button id="calibrateLocalGyroBtn" class="icon-btn" type="button" style="justify-content:center;">🎯 校正中立</button>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.78rem;font-weight:700;cursor:pointer;">
+              <input id="localPitchToggle" type="checkbox"> 啟用前後傾斜（前傾加速 / 後傾煞車）
+            </label>
+          </div>
+
+          <!-- Snack Style -->
+          <div class="setting-row">
+            <div class="setting-label"><span>補給品外觀</span></div>
+            <div class="chip-group two-col">
+              <button type="button" class="chip selected" data-snack="local">各地特色小吃（推薦）</button>
+              <button type="button" class="chip" data-snack="basic">統一基礎（香蕉＋水壺）</button>
+            </div>
+          </div>
+
+          <!-- Steering Mode -->
+          <div class="setting-row">
+            <div class="setting-label"><span>轉向手感模式</span></div>
+            <div class="chip-group two-col">
+              <button type="button" class="chip selected" data-steer="smooth">連續平滑位移（推薦）</button>
+              <button type="button" class="chip" data-steer="lanes">三車道定位（復健格狀）</button>
+            </div>
+          </div>
+
+          <!-- Lane Touch Mode (ONLY visible when lanes mode is chosen!) -->
+          <div id="laneTouchConfigRow" class="setting-row hidden">
+            <div class="setting-label"><span>三車道螢幕觸控方式</span></div>
+            <div class="chip-group two-col">
+              <button type="button" class="chip selected" data-touchmode="hold">按住左右半邊（放開回中）</button>
+              <button type="button" class="chip" data-touchmode="tap">點一下切換車道</button>
+            </div>
+          </div>
+
+          <!-- Speed & Freq -->
+          <div class="setting-row">
+            <div class="setting-label"><span>基礎車速微調</span></div>
+            <div class="chip-group">
+              <button type="button" class="chip" data-basespd="slow">🐢 偏慢</button>
+              <button type="button" class="chip selected" data-basespd="medium">🚲 標準</button>
+              <button type="button" class="chip" data-basespd="fast">⚡ 偏快</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label"><span>事件出現頻率</span></div>
+            <div class="chip-group">
+              <button type="button" class="chip" data-freq="low">稀疏</button>
+              <button type="button" class="chip selected" data-freq="medium">適中</button>
+              <button type="button" class="chip" data-freq="high">密集</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label"><span>速度控制</span></div>
+            <div class="chip-group two-col">
+              <button type="button" class="chip selected" data-spdctrl="auto">自動巡航（可用↑↓微調）</button>
+              <button type="button" class="chip" data-spdctrl="manual">手動油門/煞車</button>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:0.8rem;font-weight:700;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input id="safetyAssistCheck" type="checkbox" checked> 安全輔助減速（接近障礙提前放慢）
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input id="lowMotionCheck" type="checkbox"> 低動態畫面（減少搖晃與速度線）
+            </label>
+          </div>
+
+          <!-- Dual-Device Pairing -->
+          <div class="setting-row" style="border-top:1px solid #e2e8f0;padding-top:10px;">
+            <div class="setting-label"><span>📱 雙裝置遙控配對（手機遙控電腦）</span></div>
+            <div class="qr-box">
+              <div id="qrContainer"></div>
+              <div style="flex:1;min-width:140px;">
+                <div style="font-size:0.76rem;color:#64748b;font-weight:700;">配對房號</div>
+                <div id="roomCodeDisplay" class="room-code-big">----</div>
+                <div id="homeConnText" style="font-size:0.76rem;color:#475569;line-height:1.35;">等待手機掃描配對...</div>
+              </div>
+            </div>
+            <button id="openControllerBtn" class="icon-btn" type="button" style="justify-content:center;padding:8px;">📲 開啟手機控制器畫面</button>
           </div>
         </div>
-        <button id="openControllerBtn" class="icon-btn" type="button" style="justify-content:center;padding:9px;">📲 開啟手機控制器畫面</button>
-      </section>
+      </details>
 
       <!-- 吱吱復健 Resource Drawer -->
       <details class="resource-drawer">
@@ -185,7 +202,7 @@
         <div class="hud-row">
           <div class="hud-card" style="flex:1;">
             <div style="display:flex;justify-content:space-between;font-size:0.8rem;font-weight:800;margin-bottom:3px;">
-              <span id="hudStageTitle">🏙️ 台北河濱段 → 台北 101</span>
+              <span id="hudStageTitle">⛵ 基隆港灣段 → 正濱漁港</span>
               <span id="hudModeInfo" style="color:#0f766e;">剩餘 02:00</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:0.74rem;font-weight:700;">
@@ -308,7 +325,7 @@
         <div class="panel-card" style="padding:9px;"><div style="font-size:0.74rem;color:#64748b;font-weight:700;">騎乘時間</div><div id="sumTime" style="font-size:1.15rem;font-weight:900;">00:00</div></div>
         <div class="panel-card" style="padding:9px;"><div style="font-size:0.74rem;color:#64748b;font-weight:700;">環島推進</div><div id="sumDist" style="font-size:1.15rem;font-weight:900;color:#ea580c;">+0</div></div>
         <div class="panel-card" style="padding:9px;"><div style="font-size:0.74rem;color:#64748b;font-weight:700;">最高連擊</div><div id="sumCombo" style="font-size:1.05rem;font-weight:900;color:#0f766e;">0</div></div>
-        <div class="panel-card" style="padding:9px;"><div style="font-size:0.74rem;color:#64748b;font-weight:700;">事件成功率</div><div id="sumSuccess" style="font-size:1.05rem;font-weight:900;color:#0f766e;">100%</div></div>
+        <div class="panel-card" style="padding:9px;"><div style="font-size:0.74rem;color:#64748b;font-weight:700;">首次一次通過率</div><div id="sumSuccess" style="font-size:1.05rem;font-weight:900;color:#0f766e;">100%</div></div>
       </div>
       <div class="panel-card" style="padding:9px;">
         <div style="font-size:0.76rem;color:#64748b;font-weight:700;">左右控制表現</div>
