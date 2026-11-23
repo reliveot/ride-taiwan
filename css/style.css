@@ -605,3 +605,36 @@ details.resource-drawer summary {
   transform: translateX(-50%);
   transition: left 0.06s linear;
 }
+/* Split-screen touch overlay on canvas */
+.canvas-touch-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  z-index: 4;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-half {
+  display: flex;
+  align-items: flex-end;
+  padding: 14px;
+  transition: background 0.12s ease;
+}
+
+.touch-half.right {
+  justify-content: flex-end;
+}
+
+.touch-half.pressed {
+  background: rgba(15, 118, 110, 0.14);
+}
+
+.touch-hint {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}

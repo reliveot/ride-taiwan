@@ -1,5 +1,5 @@
 /**
- * 《騎遍台灣》V2.0 — Complete Marathon & Rehab Game Engine
+ * 《騎遍台灣》V2.0 — Complete Marathon & Rehab Game Engine (Fixed Controls & Scenery-First Landmarks)
  */
 (function () {
   'use strict';
@@ -11,7 +11,6 @@
 
   const $ = (id) => document.getElementById(id);
 
-  // --- Seeded RNG ---
   function mulberry32(seed) {
     let a = seed >>> 0;
     return function () {
@@ -23,7 +22,6 @@
     };
   }
 
-  // --- Persistent Storage ---
   function loadSave() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -33,46 +31,41 @@
           tourUnits: parsed.tourUnits || 0,
           loopsCompleted: parsed.loopsCompleted || 0,
           unlockedIds: Array.isArray(parsed.unlockedIds) ? parsed.unlockedIds : [],
-          records: Array.isArray(parsed.records) ? parsed.records : [],
-          prefs: parsed.prefs || {}
+          records: Array.isArray(parsed.records) ? parsed.records : []
         };
       }
     } catch (e) {}
-    return { tourUnits: 0, loopsCompleted: 0, unlockedIds: [], records: [], prefs: {} };
+    return { tourUnits: 0, loopsCompleted: 0, unlockedIds: [], records: [] };
   }
 
   function writeSave(data) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
   }
 
   let saveData = loadSave();
 
-  // --- App & Game State ---
   const state = {
-    view: 'home', // 'home' | 'game' | 'controller'
+    view: 'home',
     running: false,
     paused: false,
     pausedByDisconnect: false,
     muted: false,
 
-    // Settings
-    mode: 'timed',           // 'timed' | 'endurance' | 'sprint'
-    timedMinutes: 3,         // 3 | 5 | 10
+    mode: 'timed',
+    timedMinutes: 3,
     sprintRouteId: 'west_coast',
-    level: 'L1',             // 'L1' | 'L2' | 'L3'
-    baseSpeedLevel: 'medium',// 'slow' | 'medium' | 'fast'
-    eventFreq: 'medium',     // 'low' | 'medium' | 'high'
-    speedControl: 'auto',    // 'auto' | 'manual'
+    level: 'L1',
+    baseSpeedLevel: 'medium',
+    eventFreq: 'medium',
+    speedControl: 'auto',
     safetyAssist: true,
     lowMotion: false,
-    touchMode: 'tap',        // 'tap' | 'hold'
+    touchMode: 'hold', // 'hold' | 'tap'
     thresholdDeg: 16,
-    enablePitch: false,
-    controlMethod: 'keyboard', // 'keyboard' | 'touch' | 'phone_tilt' | 'phone_touch' | 'local_tilt'
+    localGyroActive: false,
+    localPitchEnabled: false,
+    controlMethod: 'keyboard',
 
-    // Live Ride State
     lane: 0,
     throttle: 0,
     bikeXNorm: 0,
@@ -92,7 +85,6 @@
     stoppedAtConstruction: false,
     constructionWaitSec: 0,
 
-    // Stats
     collectedCount: 0,
     eventsTotal: 0,
     eventsSuccess: 0,
@@ -104,17 +96,14 @@
     decelCount: 0,
     stopCount: 0,
     newUnlockedThisRun: [],
-    lastStationPassed: -1,
+    completedStationsCount: 0,
 
-    // Entities
     activeEvent: null,
     spawnCooldown: 1.5,
-    lastSafeLane: 0,
     rng: Math.random,
     particles: [],
     floatingTexts: [],
 
-    // Pairing
     roomCode: RehabLink.generateRoomCode(),
     phoneConnected: false
   };
@@ -127,7 +116,6 @@
   let toastTimeout = 0;
   let wakeLock = null;
 
-  // --- View Switching ---
   function showView(v) {
     state.view = v;
     $('homeView').classList.toggle('hidden', v !== 'home');
@@ -138,10 +126,9 @@
   }
 
   function refreshHomeStats() {
-    const unlockedCount = saveData.unlockedIds.length;
-    $('openAlbumBtn').textContent = '📖 台灣景點收藏冊 (' + unlockedCount + ' / ' + LANDMARKS.length + ')';
+    $('openAlbumBtn').textContent = '📖 景點收藏冊 (' + saveData.unlockedIds.length + ' / ' + LANDMARKS.length + ')';
     const loopPct = Math.round(((saveData.tourUnits % (UNITS_PER_STATION * LANDMARKS.length)) / (UNITS_PER_STATION * LANDMARKS.length)) * 100);
-    $('homeTourBadge').textContent = '第 ' + (saveData.loopsCompleted + 1) + ' 圈環島進度 ' + loopPct + '%';
+    $('homeTourBadge').textContent = '第 ' + (saveData.loopsCompleted + 1) + ' 圈 ' + loopPct + '%';
   }
 
   function updateConnectionUI() {
@@ -150,6 +137,9 @@
       pill.textContent = '📱 手機已連線';
       pill.className = 'pill connected';
       $('homeConnText').textContent = '✅ 手機控制器已連線！可切換傾斜或觸控遙控電腦。';
+    } else if (state.localGyroActive) {
+      pill.textContent = '🧭 本機陀螺儀';
+      pill.className = 'pill connected';
     } else {
       pill.textContent = '⌨️ 單機 / 觸控';
       pill.className = 'pill sim';
@@ -157,22 +147,40 @@
     }
   }
 
-  // --- Pairing ---
-  function initHostPairing() {
-    $('roomCodeDisplay').textContent = state.roomCode;
+  function renderQRCode() {
     const base = window.location.protocol.startsWith('http')
       ? (window.location.origin + window.location.pathname)
       : '';
-    const ctrlUrl = base ? (base + '?mode=controller&room=' + state.roomCode) : '';
-
+    const ctrlUrl = base ? (base + '?mode=controller&room=' + state.roomCode) : ('RTW-ROOM:' + state.roomCode);
     const qrWrap = $('qrContainer');
+    if (!qrWrap) return;
     qrWrap.innerHTML = '';
-    if (typeof QRCode !== 'undefined' && ctrlUrl) {
-      new QRCode(qrWrap, { text: ctrlUrl, width: 102, height: 102, colorDark: '#0f766e', colorLight: '#ffffff' });
+    if (typeof QRCode !== 'undefined') {
+      new QRCode(qrWrap, { text: ctrlUrl, width: 100, height: 100, colorDark: '#0f766e', colorLight: '#ffffff' });
     } else {
-      qrWrap.innerHTML = '<div style="font-size:11px;color:#64748b;text-align:center;">房號配對<br><strong style="font-size:16px;color:#0f766e;">' + state.roomCode + '</strong><br>部署後顯示QR</div>';
+      qrWrap.innerHTML = '<div style="font-size:11px;color:#64748b;text-align:center;">房號配對<br><strong style="font-size:16px;color:#0f766e;">' + state.roomCode + '</strong></div>';
     }
+  }
 
+  function initHostPairing() {
+    $('roomCodeDisplay').textContent = state.roomCode;
+    renderQRCode();
+    // Retry QRCode & PeerJS if async CDN finishes slightly after boot
+    let retries = 0;
+    const cdnWait = setInterval(() => {
+      retries += 1;
+      if (typeof QRCode !== 'undefined') renderQRCode();
+      if (typeof Peer !== 'undefined' && !link.peer) {
+        startHostLink();
+        clearInterval(cdnWait);
+      } else if (retries > 12) {
+        clearInterval(cdnWait);
+      }
+    }, 500);
+    startHostLink();
+  }
+
+  function startHostLink() {
     link.createHost(state.roomCode, {
       onConnect: () => {
         state.phoneConnected = true;
@@ -208,7 +216,6 @@
     });
   }
 
-  // --- Unified Control Engine (LEFT / CENTER / RIGHT + Throttle/Brake) ---
   function setLane(newLane) {
     const clamped = newLane < 0 ? -1 : (newLane > 0 ? 1 : 0);
     if (clamped !== state.lane) {
@@ -226,13 +233,36 @@
     $('btnBrake').classList.toggle('active-brk', state.throttle === -1);
   }
 
-  // --- Start & End Game ---
+  // --- Local Phone Gyroscope (Direct Play on Phone) ---
+  function setupLocalGyro() {
+    if (!localSensor) {
+      localSensor = new TiltSensorEngine({
+        thresholdDeg: state.thresholdDeg,
+        enablePitch: state.localPitchEnabled,
+        onUpdate: (data) => {
+          if (state.running && !state.paused) {
+            state.controlMethod = 'local_tilt';
+            setLane(data.lane);
+            if (state.speedControl === 'manual' && state.localPitchEnabled) {
+              setThrottle(data.throttle);
+            }
+          }
+        },
+        onStatus: (st) => {
+          $('localGyroBadge').textContent = st.supported ? '✅ 已啟用' : '⚠️ 不支援';
+          $('localGyroBadge').className = st.supported ? 'pill connected' : 'pill warn';
+        }
+      });
+    }
+  }
+
   function startGame() {
     state.running = true;
     state.paused = false;
     state.pausedByDisconnect = false;
     $('disconnectBanner').classList.add('hidden');
     $('manualSpeedBar').classList.toggle('hidden', state.speedControl !== 'manual');
+    $('hudCalibrateBtn').classList.toggle('hidden', !state.localGyroActive);
 
     state.lane = 0;
     state.throttle = 0;
@@ -260,6 +290,7 @@
     state.decelCount = 0;
     state.stopCount = 0;
     state.newUnlockedThisRun = [];
+    state.completedStationsCount = 0;
 
     state.activeEvent = null;
     state.spawnCooldown = 1.2;
@@ -271,11 +302,8 @@
     if (state.mode === 'sprint') {
       const route = SPRINT_ROUTES.find((r) => r.id === state.sprintRouteId) || SPRINT_ROUTES[0];
       state.rng = mulberry32(route.seed);
-      state.lastStationPassed = route.startStation;
     } else {
       state.rng = Math.random;
-      const curIdx = Math.floor((saveData.tourUnits % (UNITS_PER_STATION * LANDMARKS.length)) / UNITS_PER_STATION);
-      state.lastStationPassed = curIdx;
     }
 
     showView('game');
@@ -289,17 +317,11 @@
 
   function endGame(reason) {
     state.running = false;
-    if (rafId) {
-      cancelAnimationFrame(rafId);
-      rafId = 0;
-    }
-    if (localSensor) localSensor.stop();
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
 
-    // Save Tour Progress (Sprint advances new unlocks without rewinding tourUnits)
     const loopTotal = UNITS_PER_STATION * LANDMARKS.length;
     if (state.mode !== 'sprint') {
-      const prevUnits = saveData.tourUnits;
-      saveData.tourUnits = prevUnits + Math.round(state.distance);
+      saveData.tourUnits += Math.round(state.distance);
       saveData.loopsCompleted = Math.floor(saveData.tourUnits / loopTotal);
     }
 
@@ -330,7 +352,6 @@
       reason
     };
 
-    // Check personal best under SAME condition key
     const sameCond = saveData.records.filter((r) => r.condKey === condKey);
     let isBest = false;
     if (sameCond.length > 0) {
@@ -346,45 +367,29 @@
     saveData.records.unshift(record);
     if (saveData.records.length > 30) saveData.records.length = 30;
     writeSave(saveData);
-
     showSummaryModal(record, isBest, sameCond.length > 0);
   }
 
-  // --- Event Generator (3 Core Templates: Collect / Obstacle / Corridor) ---
   function spawnNextEvent() {
     const r = state.rng;
-    const freqBonus = state.eventFreq === 'low' ? 1.2 : (state.eventFreq === 'high' ? 0.6 : 0.9);
-    state.spawnCooldown = freqBonus;
-
-    // Choose template weighted by Level
+    state.spawnCooldown = state.eventFreq === 'low' ? 1.2 : (state.eventFreq === 'high' ? 0.6 : 0.9);
     const roll = r();
     let type = 'collect';
-    if (state.stamina < 45 && roll < 0.42) {
-      type = 'collect';
-    } else if (roll < 0.30) {
-      type = 'collect';
-    } else if (roll < 0.78 || state.level === 'L1') {
-      type = 'obstacle';
-    } else {
-      type = 'corridor';
-    }
+    if (state.stamina < 45 && roll < 0.42) type = 'collect';
+    else if (roll < 0.30) type = 'collect';
+    else if (roll < 0.78 || state.level === 'L1') type = 'obstacle';
+    else type = 'corridor';
 
     if (type === 'collect') {
       const item = COLLECTIBLES[Math.floor(r() * COLLECTIBLES.length)];
       const lane = state.level === 'L1' ? (r() < 0.5 ? -1 : 1) : (Math.floor(r() * 3) - 1);
-      state.activeEvent = {
-        template: 'collect',
-        lane,
-        item,
-        z: 1.0,
-        resolved: false
-      };
+      state.activeEvent = { template: 'collect', lane, item, z: 1.0, resolved: false };
       return;
     }
 
     if (type === 'obstacle') {
       const kindRoll = r();
-      let kind = 'bump'; // 'bump' | 'cyclist' | 'construction'
+      let kind = 'bump';
       if (state.level !== 'L1') {
         if (kindRoll > 0.80) kind = 'construction';
         else if (kindRoll > 0.55) kind = 'cyclist';
@@ -394,52 +399,25 @@
 
       if (kind === 'construction') {
         const safeLane = Math.floor(r() * 3) - 1;
-        state.activeEvent = {
-          template: 'obstacle',
-          kind: 'construction',
-          safeLane,
-          blockedLanes: [-1, 0, 1].filter((l) => l !== safeLane),
-          z: 1.0,
-          resolved: false
-        };
+        state.activeEvent = { template: 'obstacle', kind: 'construction', safeLane, blockedLanes: [-1, 0, 1].filter((l) => l !== safeLane), z: 1.0, resolved: false };
         const dirText = safeLane === -1 ? '左側' : (safeLane === 0 ? '中央' : '右側');
         showBanner('🚧 前方施工，請靠' + dirText + '通行！', 'warn');
-        state.lastSafeLane = safeLane;
         return;
       }
-
       if (kind === 'cyclist') {
         const occLane = Math.floor(r() * 3) - 1;
-        state.activeEvent = {
-          template: 'obstacle',
-          kind: 'cyclist',
-          lane: occLane,
-          z: 1.0,
-          resolved: false
-        };
+        state.activeEvent = { template: 'obstacle', kind: 'cyclist', lane: occLane, z: 1.0, resolved: false };
         showBanner('🚴 前方有慢速車友，準備換道超車！', '');
         return;
       }
-
-      // Bump (water puddle / gravel)
       const count = (state.level === 'L3' && r() < 0.45) ? 2 : 1;
       const allLanes = [-1, 0, 1];
       const blocked = [];
-      for (let i = 0; i < count; i++) {
-        const idx = Math.floor(r() * allLanes.length);
-        blocked.push(allLanes.splice(idx, 1)[0]);
-      }
-      state.activeEvent = {
-        template: 'obstacle',
-        kind: 'bump',
-        blockedLanes: blocked,
-        z: 1.0,
-        resolved: false
-      };
+      for (let i = 0; i < count; i++) blocked.push(allLanes.splice(Math.floor(r() * allLanes.length), 1)[0]);
+      state.activeEvent = { template: 'obstacle', kind: 'bump', blockedLanes: blocked, z: 1.0, resolved: false };
       return;
     }
 
-    // Template C: Corridor / Continuous Turns
     const segCount = state.level === 'L2' ? 3 : 4;
     const seq = [];
     let cur = Math.floor(r() * 3) - 1;
@@ -448,14 +426,7 @@
       const nextChoices = [-1, 0, 1].filter((l) => Math.abs(l - cur) <= 1);
       cur = nextChoices[Math.floor(r() * nextChoices.length)];
     }
-    state.activeEvent = {
-      template: 'corridor',
-      seq,
-      segIndex: 0,
-      segProgress: 0,
-      failed: false,
-      z: 1.0
-    };
+    state.activeEvent = { template: 'corridor', seq, segIndex: 0, segProgress: 0, failed: false, z: 1.0 };
     showBanner('✨ 沿著發光安全車道前進！', 'boost');
   }
 
@@ -466,19 +437,12 @@
     el.classList.remove('hidden');
   }
 
-  function hideBanner() {
-    $('eventBanner').classList.add('hidden');
-  }
+  function hideBanner() { $('eventBanner').classList.add('hidden'); }
 
   function recordEventOutcome(success, laneHint) {
     state.eventsTotal += 1;
-    if (laneHint === -1) {
-      state.leftTotal += 1;
-      if (success) state.leftSuccess += 1;
-    } else if (laneHint === 1) {
-      state.rightTotal += 1;
-      if (success) state.rightSuccess += 1;
-    }
+    if (laneHint === -1) { state.leftTotal += 1; if (success) state.leftSuccess += 1; }
+    else if (laneHint === 1) { state.rightTotal += 1; if (success) state.rightSuccess += 1; }
 
     if (success) {
       state.eventsSuccess += 1;
@@ -496,14 +460,11 @@
     }
   }
 
-  // --- Physics & Update ---
   function gameLoop(now) {
     if (!state.running) return;
     const dt = Math.min(0.05, (now - lastFrameMs) / 1000);
     lastFrameMs = now;
-    if (!state.paused) {
-      updatePhysics(dt);
-    }
+    if (!state.paused) updatePhysics(dt);
     renderScene();
     rafId = requestAnimationFrame(gameLoop);
   }
@@ -529,46 +490,29 @@
     $('postcardTitle').textContent = lm.county + ' · ' + lm.name;
     $('postcardToast').classList.remove('hidden');
     clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => {
-      $('postcardToast').classList.add('hidden');
-    }, 4200);
+    toastTimeout = setTimeout(() => $('postcardToast').classList.add('hidden'), 4200);
   }
 
   function updatePhysics(dt) {
     state.elapsedSec += dt;
-
-    // Timers
     if (state.boostTimer > 0) state.boostTimer = Math.max(0, state.boostTimer - dt);
     if (state.boostCooldown > 0) state.boostCooldown = Math.max(0, state.boostCooldown - dt);
     if (state.bumpTimer > 0) state.bumpTimer = Math.max(0, state.bumpTimer - dt);
 
-    // Stamina drain (0.4%/s normal, 0.2%/s when stopped at construction)
     const drainRate = state.stoppedAtConstruction ? 0.2 : 0.4;
     state.stamina = Math.max(0, state.stamina - drainRate * dt);
 
-    // Check Mode End Conditions
-    if (state.mode === 'timed' && state.elapsedSec >= state.timedMinutes * 60) {
-      endGame('timeup');
-      return;
-    }
-    if (state.mode === 'endurance' && state.stamina <= 0) {
-      endGame('exhausted');
-      return;
-    }
+    if (state.mode === 'timed' && state.elapsedSec >= state.timedMinutes * 60) { endGame('timeup'); return; }
+    if (state.mode === 'endurance' && state.stamina <= 0) { endGame('exhausted'); return; }
     if (state.mode === 'sprint') {
       const route = SPRINT_ROUTES.find((r) => r.id === state.sprintRouteId) || SPRINT_ROUTES[0];
-      if (state.distance >= route.distanceUnits) {
-        endGame('finished');
-        return;
-      }
+      if (state.distance >= route.distanceUnits) { endGame('finished'); return; }
     }
 
-    // Smooth Bike Lane Movement
     const prevX = state.bikeXNorm;
     state.bikeXNorm += (state.lane - state.bikeXNorm) * Math.min(1, dt * 11);
     state.bikeLean = state.lowMotion ? 0 : (state.lane - prevX) * 0.22;
 
-    // Compute Effective Speed (Priority: Construction Stop > Cyclist Follow > Bump > Boost)
     const baseSpeedMap = { slow: 85, medium: 120, fast: 158 };
     const baseSpd = baseSpeedMap[state.baseSpeedLevel] || 120;
     const staminaFactor = 0.55 + 0.45 * (state.stamina / 100);
@@ -579,7 +523,6 @@
       else if (state.throttle === -1) speedMult *= 0.45;
     }
 
-    // Safety Assist Deceleration before obstacles
     if (state.safetyAssist && state.activeEvent && state.activeEvent.template === 'obstacle') {
       const ev = state.activeEvent;
       if (ev.z < 0.42 && ev.z > 0.16) {
@@ -590,51 +533,39 @@
       }
     }
 
-    if (state.stoppedAtConstruction) {
-      speedMult = 0;
-    } else if (state.followingCyclist) {
-      speedMult = Math.min(speedMult, 0.48);
-    } else if (state.bumpTimer > 0) {
-      speedMult *= 0.80;
-    } else if (state.boostTimer > 0) {
-      speedMult *= 1.20;
-    }
+    if (state.stoppedAtConstruction) speedMult = 0;
+    else if (state.followingCyclist) speedMult = Math.min(speedMult, 0.48);
+    else if (state.bumpTimer > 0) speedMult *= 0.80;
+    else if (state.boostTimer > 0) speedMult *= 1.20;
 
     state.currentSpeedUnits = baseSpd * speedMult;
     state.distance += state.currentSpeedUnits * dt;
     state.pedalPhase += dt * (state.currentSpeedUnits * 0.065);
     state.roadScroll = (state.roadScroll + dt * (state.currentSpeedUnits * 0.012)) % 1;
 
-    // Check Landmark Passing
-    const curStation = getCurrentStationIndex();
-    if (curStation !== state.lastStationPassed) {
-      state.lastStationPassed = curStation;
-      triggerPassingLandmark(curStation);
+    // Scenery first! Stamp postcard AFTER completing each 1000-unit stretch of that county
+    const completed = Math.floor(state.distance / UNITS_PER_STATION);
+    if (completed > state.completedStationsCount) {
+      const finishedIdx = (getCurrentStationIndex() - 1 + LANDMARKS.length) % LANDMARKS.length;
+      state.completedStationsCount = completed;
+      triggerPassingLandmark(finishedIdx);
     }
 
-    // Active Event Update
     if (!state.activeEvent) {
       state.spawnCooldown -= dt;
-      if (state.spawnCooldown <= 0) {
-        spawnNextEvent();
-      }
+      if (state.spawnCooldown <= 0) spawnNextEvent();
     } else {
       updateActiveEvent(dt);
     }
 
-    // Particles & Floating Texts
     for (let i = state.particles.length - 1; i >= 0; i--) {
       const p = state.particles[i];
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vy += 220 * dt;
-      p.life -= dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 220 * dt; p.life -= dt;
       if (p.life <= 0) state.particles.splice(i, 1);
     }
     for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
       const ft = state.floatingTexts[i];
-      ft.y -= 34 * dt;
-      ft.life -= dt;
+      ft.y -= 34 * dt; ft.life -= dt;
       if (ft.life <= 0) state.floatingTexts.splice(i, 1);
     }
 
@@ -681,12 +612,8 @@
         } else {
           state.constructionWaitSec += dt;
           if (state.lane === ev.safeLane || state.constructionWaitSec >= 6.0) {
-            if (state.constructionWaitSec >= 6.0) {
-              showBanner('👷 辛苦了！工作人員幫您開便道通過～', '');
-            } else {
-              hideBanner();
-              recordEventOutcome(true, ev.safeLane);
-            }
+            if (state.constructionWaitSec >= 6.0) showBanner('👷 辛苦了！工作人員幫您開便道通過～', '');
+            else { hideBanner(); recordEventOutcome(true, ev.safeLane); }
             state.stoppedAtConstruction = false;
             ev.resolved = true;
             state.activeEvent = null;
@@ -710,18 +637,15 @@
             hideBanner();
             state.activeEvent = null;
           }
-        } else {
-          if (state.lane !== ev.lane) {
-            state.followingCyclist = false;
-            hideBanner();
-            spawnFeedback(state.lane, '順利超車！', '#0f766e');
-            state.activeEvent = null;
-          }
+        } else if (state.lane !== ev.lane) {
+          state.followingCyclist = false;
+          hideBanner();
+          spawnFeedback(state.lane, '順利超車！', '#0f766e');
+          state.activeEvent = null;
         }
         return;
       }
 
-      // Bump (puddle/gravel)
       ev.z -= approachRate * dt;
       if (!ev.resolved && ev.z <= 0.16) {
         ev.resolved = true;
@@ -743,8 +667,7 @@
       ev.z = Math.max(0.14, ev.z - approachRate * dt);
       if (ev.z <= 0.20) {
         ev.segProgress += dt * 0.75;
-        const targetLane = ev.seq[ev.segIndex];
-        if (state.lane !== targetLane) ev.failed = true;
+        if (state.lane !== ev.seq[ev.segIndex]) ev.failed = true;
         if (ev.segProgress >= 1.0) {
           ev.segProgress = 0;
           ev.segIndex += 1;
@@ -777,25 +700,19 @@
     }
   }
 
-  // --- HUD ---
   function updateHUD() {
     const idx = getCurrentStationIndex();
     const lm = LANDMARKS[idx] || LANDMARKS[0];
-    $('hudStageTitle').textContent = lm.icon + ' ' + lm.county + ' · ' + lm.name;
+    $('hudStageTitle').textContent = lm.icon + ' ' + lm.county + '風景 → 前往 ' + lm.name;
 
     if (state.mode === 'timed') {
       const rem = Math.max(0, state.timedMinutes * 60 - Math.floor(state.elapsedSec));
-      const m = Math.floor(rem / 60);
-      const s = rem % 60;
-      $('hudModeInfo').textContent = '剩餘 ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+      $('hudModeInfo').textContent = '剩餘 ' + String(Math.floor(rem / 60)).padStart(2, '0') + ':' + String(rem % 60).padStart(2, '0');
     } else if (state.mode === 'sprint') {
       const route = SPRINT_ROUTES.find((r) => r.id === state.sprintRouteId) || SPRINT_ROUTES[0];
-      const pct = Math.min(100, Math.round((state.distance / route.distanceUnits) * 100));
-      $('hudModeInfo').textContent = '衝線進度 ' + pct + '%';
+      $('hudModeInfo').textContent = '衝線進度 ' + Math.min(100, Math.round((state.distance / route.distanceUnits) * 100)) + '%';
     } else {
-      const m = Math.floor(state.elapsedSec / 60);
-      const s = Math.floor(state.elapsedSec) % 60;
-      $('hudModeInfo').textContent = '已撐 ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+      $('hudModeInfo').textContent = '已撐 ' + String(Math.floor(state.elapsedSec / 60)).padStart(2, '0') + ':' + String(Math.floor(state.elapsedSec) % 60).padStart(2, '0');
     }
 
     $('hudStaminaText').textContent = Math.round(state.stamina) + '%';
@@ -804,7 +721,6 @@
     $('hudComboBadge').textContent = '🔥 ' + state.combo + ' 連擊';
   }
 
-  // --- Canvas Rendering ---
   function resizeCanvas() {
     const canvas = $('gameCanvas');
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -827,14 +743,12 @@
     const lm = LANDMARKS[getCurrentStationIndex()] || LANDMARKS[0];
     const th = lm.theme;
 
-    // Sky
     const sky = ctx.createLinearGradient(0, 0, 0, h * 0.42);
     sky.addColorStop(0, th.skyTop);
     sky.addColorStop(1, th.skyBottom);
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, w, h * 0.44);
 
-    // Mountains
     const horizonY = h * 0.40;
     ctx.fillStyle = th.hillBack;
     ctx.beginPath();
@@ -846,11 +760,22 @@
     ctx.closePath();
     ctx.fill();
 
-    // Ground
+    // County Scenery Landmark Silhouette on Horizon (before stamp!)
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.14)';
+    if (lm.id === 'taipei_101') {
+      ctx.fillRect(w * 0.76, horizonY - 70, 16, 70);
+      ctx.fillRect(w * 0.81, horizonY - 88, 6, 18);
+    } else if (lm.id === 'gaomei' || lm.id === 'nanliao') {
+      [0.2, 0.75].forEach((fx) => {
+        ctx.fillRect(w * fx - 2, horizonY - 46, 4, 46);
+      });
+    }
+    ctx.restore();
+
     ctx.fillStyle = th.ground;
     ctx.fillRect(0, horizonY, w, h - horizonY);
 
-    // Road
     const roadTopW = w * 0.22;
     const roadBotW = w * 0.92;
     ctx.fillStyle = th.road;
@@ -862,7 +787,6 @@
     ctx.closePath();
     ctx.fill();
 
-    // Lane Dividers
     ctx.strokeStyle = 'rgba(255,255,255,0.65)';
     ctx.lineWidth = 2.5;
     for (let i = 0; i < 8; i++) {
@@ -880,21 +804,34 @@
       });
     }
 
-    // Speed Lines during Boost
+    // Roadside Scenery Trees scrolling toward player
+    for (let i = 0; i < 6; i++) {
+      const z = ((i + state.roadScroll) / 6);
+      const p = Math.pow(z, 1.6);
+      const y = horizonY + p * (h - horizonY);
+      const halfRoad = (roadTopW + (roadBotW - roadTopW) * p) * 0.5;
+      const scale = 0.25 + p * 0.95;
+      [-1, 1].forEach((side) => {
+        const tx = w * 0.5 + side * (halfRoad + 26 * scale);
+        ctx.fillStyle = '#78350f';
+        ctx.fillRect(tx - 3 * scale, y - 16 * scale, 6 * scale, 16 * scale);
+        ctx.fillStyle = lm.id === 'taipei_101' ? '#f9a8d4' : th.accent;
+        ctx.beginPath();
+        ctx.arc(tx, y - 24 * scale, 14 * scale, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
     if (state.boostTimer > 0 && !state.lowMotion) {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
       ctx.lineWidth = 2;
       for (let i = 0; i < 6; i++) {
         const lx = (i % 2 === 0 ? 18 : w - 18) + (Math.random() * 14 - 7);
         const ly = h * 0.2 + Math.random() * h * 0.6;
-        ctx.beginPath();
-        ctx.moveTo(lx, ly);
-        ctx.lineTo(lx, ly + 45);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, ly + 45); ctx.stroke();
       }
     }
 
-    // Active Event Rendering
     if (state.activeEvent) {
       const ev = state.activeEvent;
       if (ev.template === 'collect') {
@@ -902,16 +839,9 @@
         const y = horizonY + Math.pow(p, 1.45) * (h * 0.78 - horizonY);
         const x = laneToScreenX(ev.lane, ev.z, w);
         const r = 14 + p * 20;
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = ev.item.color;
-        ctx.lineWidth = 3.5;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.font = Math.round(r * 1.15) + 'px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff'; ctx.strokeStyle = ev.item.color; ctx.lineWidth = 3.5;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(ev.item.icon, x, y + 2);
       } else if (ev.template === 'obstacle') {
         const p = 1 - ev.z;
@@ -921,86 +851,52 @@
           ev.blockedLanes.forEach((bl) => {
             const x = laneToScreenX(bl, ev.z, w);
             ctx.fillStyle = '#38bdf8';
-            ctx.beginPath();
-            ctx.ellipse(x, y, r * 1.15, r * 0.55, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.font = Math.round(r) + 'px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
+            ctx.beginPath(); ctx.ellipse(x, y, r * 1.15, r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.font = Math.round(r) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText('💦', x, y);
           });
         } else if (ev.kind === 'cyclist') {
           const x = laneToScreenX(ev.lane, ev.z, w);
-          ctx.fillStyle = '#fef3c7';
-          ctx.strokeStyle = '#d97706';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(x, y, r, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.font = Math.round(r * 1.15) + 'px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#fef3c7'; ctx.strokeStyle = '#d97706'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText('🚴', x, y + 1);
         } else if (ev.kind === 'construction') {
           ev.blockedLanes.forEach((bl) => {
             const x = laneToScreenX(bl, ev.z, w);
-            ctx.fillStyle = '#fee2e2';
-            ctx.strokeStyle = '#dc2626';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.font = Math.round(r * 1.1) + 'px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#fee2e2'; ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            ctx.font = Math.round(r * 1.1) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText('🚧', x, y + 1);
           });
-          // Safe lane green arrow
           const sx = laneToScreenX(ev.safeLane, ev.z, w);
-          ctx.fillStyle = '#22c55e';
-          ctx.font = 'bold ' + Math.round(r * 1.1) + 'px sans-serif';
-          ctx.textAlign = 'center';
+          ctx.fillStyle = '#22c55e'; ctx.font = 'bold ' + Math.round(r * 1.1) + 'px sans-serif'; ctx.textAlign = 'center';
           ctx.fillText('⬆️', sx, y);
         }
       } else if (ev.template === 'corridor') {
         const targetLane = ev.seq[ev.segIndex];
         const x = laneToScreenX(targetLane, 0.25, w);
         ctx.save();
-        ctx.fillStyle = 'rgba(34, 197, 94, 0.35)';
-        ctx.strokeStyle = '#16a34a';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.roundRect(x - 42, horizonY + 30, 84, h * 0.45, 16);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.35)'; ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.roundRect(x - 42, horizonY + 30, 84, h * 0.45, 16); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('安全車道 ' + (ev.segIndex + 1) + '/' + ev.seq.length, x, horizonY + 60);
         ctx.restore();
       }
     }
 
-    // Cyclist
     const bikeY = state.bumpTimer > 0 ? h * 0.81 + Math.sin(state.elapsedSec * 40) * 4 : h * 0.81;
     drawCyclist(ctx, laneToScreenX(state.bikeXNorm, 0.08, w), bikeY, state.bikeLean, state.pedalPhase);
 
-    // Particles & Floating Texts
     state.particles.forEach((p) => {
       ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
       ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); ctx.fill();
     });
     ctx.globalAlpha = 1;
     state.floatingTexts.forEach((ft) => {
       ctx.globalAlpha = Math.min(1, ft.life);
-      ctx.font = 'bold 18px sans-serif';
-      ctx.fillStyle = ft.color || '#ea580c';
-      ctx.textAlign = 'center';
+      ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = ft.color || '#ea580c'; ctx.textAlign = 'center';
       ctx.fillText(ft.text, ft.x, ft.y);
     });
     ctx.globalAlpha = 1;
@@ -1011,46 +907,22 @@
     ctx.translate(x, y);
     ctx.rotate(lean);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
-    ctx.beginPath();
-    ctx.ellipse(0, 34, 28, 8, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 34, 28, 8, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#1e293b';
-    ctx.beginPath();
-    ctx.roundRect(-7, 4, 14, 32, 6);
-    ctx.fill();
-    ctx.strokeStyle = '#0f766e';
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(0, 12);
-    ctx.lineTo(0, -14);
-    ctx.stroke();
-    ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(-22, -22);
-    ctx.lineTo(22, -22);
-    ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(-7, 4, 14, 32, 6); ctx.fill();
+    ctx.strokeStyle = '#0f766e'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(0, 12); ctx.lineTo(0, -14); ctx.stroke();
+    ctx.strokeStyle = '#334155'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(-22, -22); ctx.lineTo(22, -22); ctx.stroke();
     const bob = state.stoppedAtConstruction ? 0 : Math.sin(pedalPhase) * 2;
-    ctx.fillStyle = '#ea580c';
-    ctx.beginPath();
-    ctx.roundRect(-16, -40 + bob, 32, 32, 11);
-    ctx.fill();
-    ctx.fillStyle = '#f59e0b';
-    ctx.beginPath();
-    ctx.roundRect(-11, -36 + bob, 22, 22, 7);
-    ctx.fill();
-    ctx.fillStyle = '#0d9488';
-    ctx.beginPath();
-    ctx.arc(0, -52 + bob, 13, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = '#ea580c'; ctx.beginPath(); ctx.roundRect(-16, -40 + bob, 32, 32, 11); ctx.fill();
+    ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.roundRect(-11, -36 + bob, 22, 22, 7); ctx.fill();
+    ctx.fillStyle = '#0d9488'; ctx.beginPath(); ctx.arc(0, -52 + bob, 13, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
-  // --- Modals (Summary, Album, History) ---
   function showSummaryModal(rec, isBest, hasSameCond) {
-    const m = Math.floor(rec.elapsedSec / 60);
-    const s = rec.elapsedSec % 60;
-    $('sumTime').textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    $('sumTime').textContent = String(Math.floor(rec.elapsedSec / 60)).padStart(2, '0') + ':' + String(rec.elapsedSec % 60).padStart(2, '0');
     $('sumDist').textContent = '+' + rec.distance + ' 單位';
     $('sumCombo').textContent = rec.maxCombo + ' 連擊';
     $('sumSuccess').textContent = rec.successRate + '%';
@@ -1066,7 +938,6 @@
       $('sumBestBadge').textContent = '新條件組合首筆紀錄（不同設定不直接比對）';
       $('sumBestBadge').className = 'pill warn';
     }
-
     $('sumAdvDetail').textContent = '加減速與停車統計：加速 ' + rec.accelCount + ' 次 · 減速 ' + rec.decelCount + ' 次 · 施工停車 ' + rec.stopCount + ' 次（模式：' + rec.mode + ' / 分級：' + rec.level + '）';
 
     const list = $('sumNewLandmarks');
@@ -1123,7 +994,6 @@
     $('historyModal').classList.remove('hidden');
   }
 
-  // --- Controller Mode (?mode=controller) ---
   function initControllerMode(roomFromUrl) {
     showView('controller');
     if (roomFromUrl) $('ctrlRoomInput').value = roomFromUrl;
@@ -1135,16 +1005,12 @@
         $('ctrlAngleReadout').textContent = Math.round(data.relativeRoll) + '°';
         const pct = Math.max(5, Math.min(95, 50 + (data.relativeRoll / 45) * 45));
         $('ctrlAngleDot').style.left = pct + '%';
-
         ['ctrlZoneLeft', 'ctrlZoneCenter', 'ctrlZoneRight'].forEach((id, idx) => {
           $(id).classList.toggle('active', data.lane === idx - 1);
         });
-
         link.send({ type: 'ctrl', source: 'tilt', lane: data.lane, throttle: data.throttle });
       },
-      onStatus: (st) => {
-        $('ctrlSensorStatus').textContent = st.message;
-      }
+      onStatus: (st) => { $('ctrlSensorStatus').textContent = st.message; }
     });
 
     const connectRoom = () => {
@@ -1156,13 +1022,8 @@
           $('ctrlConnStatus').textContent = transport === 'webrtc' ? '✅ 已透過網路配對' : '✅ 已透過本機分頁配對';
           $('ctrlConnStatus').className = 'pill connected';
         },
-        onDisconnect: () => {
-          $('ctrlConnStatus').textContent = '連線中斷';
-          $('ctrlConnStatus').className = 'pill';
-        },
-        onError: () => {
-          $('ctrlConnStatus').textContent = '連線失敗，請確認房號';
-        }
+        onDisconnect: () => { $('ctrlConnStatus').textContent = '連線中斷'; $('ctrlConnStatus').className = 'pill'; },
+        onError: () => { $('ctrlConnStatus').textContent = '連線失敗，請確認房號'; }
       });
     };
 
@@ -1173,16 +1034,13 @@
       await controllerSensor.requestPermissionAndStart();
       wakeLock = await requestWakeLock();
     });
-
     $('ctrlCalibrateBtn').addEventListener('click', () => {
       controllerSensor.calibrateNeutral();
       link.send({ type: 'calibrate' });
     });
-
     $('ctrlPitchToggle').addEventListener('change', (e) => {
       controllerSensor.setConfig({ enablePitch: e.target.checked });
     });
-
     document.querySelectorAll('.ctrl-touch-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const lane = Number(btn.dataset.lane);
@@ -1194,7 +1052,6 @@
     });
   }
 
-  // --- Event Bindings ---
   function bindEvents() {
     $('startGameBtn').addEventListener('click', startGame);
     $('endGameBtn').addEventListener('click', () => endGame('manual'));
@@ -1202,14 +1059,8 @@
     $('openHistoryBtn').addEventListener('click', showHistoryModal);
     $('closeAlbumBtn').addEventListener('click', () => $('albumModal').classList.add('hidden'));
     $('closeHistoryBtn').addEventListener('click', () => $('historyModal').classList.add('hidden'));
-    $('sumReplayBtn').addEventListener('click', () => {
-      $('summaryModal').classList.add('hidden');
-      startGame();
-    });
-    $('sumHomeBtn').addEventListener('click', () => {
-      $('summaryModal').classList.add('hidden');
-      showView('home');
-    });
+    $('sumReplayBtn').addEventListener('click', () => { $('summaryModal').classList.add('hidden'); startGame(); });
+    $('sumHomeBtn').addEventListener('click', () => { $('summaryModal').classList.add('hidden'); showView('home'); });
 
     $('muteBtn').addEventListener('click', () => {
       state.muted = !state.muted;
@@ -1217,7 +1068,29 @@
       $('muteBtn').textContent = state.muted ? '🔇 靜音' : '🔊 音效';
     });
 
-    // Mode, Level, Speed, Frequency chips
+    // Local Phone Gyroscope Enable & Calibrate
+    $('enableLocalGyroBtn').addEventListener('click', async () => {
+      setupLocalGyro();
+      const ok = await localSensor.requestPermissionAndStart();
+      if (ok) {
+        state.localGyroActive = true;
+        state.controlMethod = 'local_tilt';
+        localSensor.calibrateNeutral();
+        updateConnectionUI();
+        wakeLock = await requestWakeLock();
+      }
+    });
+    $('calibrateLocalGyroBtn').addEventListener('click', () => {
+      if (localSensor) localSensor.calibrateNeutral();
+    });
+    $('hudCalibrateBtn').addEventListener('click', () => {
+      if (localSensor) localSensor.calibrateNeutral();
+    });
+    $('localPitchToggle').addEventListener('change', (e) => {
+      state.localPitchEnabled = e.target.checked;
+      if (localSensor) localSensor.setConfig({ enablePitch: state.localPitchEnabled });
+    });
+
     document.querySelectorAll('[data-mode]').forEach((b) => {
       b.addEventListener('click', () => {
         state.mode = b.dataset.mode;
@@ -1232,9 +1105,7 @@
         document.querySelectorAll('[data-mins]').forEach((x) => x.classList.toggle('selected', x === b));
       });
     });
-    $('sprintRouteSelect').addEventListener('change', (e) => {
-      state.sprintRouteId = e.target.value;
-    });
+    $('sprintRouteSelect').addEventListener('change', (e) => { state.sprintRouteId = e.target.value; });
     document.querySelectorAll('[data-level]').forEach((b) => {
       b.addEventListener('click', () => {
         state.level = b.dataset.level;
@@ -1282,28 +1153,39 @@
       showView('home');
     });
 
-    // Touch Lane Buttons (Tap vs Hold)
+    // Split-Screen Canvas Touch (Left Half / Right Half)
+    const bindSplitTouch = (el, targetLane) => {
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        state.controlMethod = 'touch';
+        el.classList.add('pressed');
+        if (state.touchMode === 'tap' && state.lane === targetLane) setLane(0);
+        else setLane(targetLane);
+      });
+      const release = () => {
+        el.classList.remove('pressed');
+        if (state.touchMode === 'hold') setLane(0);
+      };
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', release);
+      el.addEventListener('pointerleave', release);
+    };
+    bindSplitTouch($('touchZoneLeft'), -1);
+    bindSplitTouch($('touchZoneRight'), 1);
+
+    // Bottom Lane Buttons
     document.querySelectorAll('.lane-btn').forEach((btn) => {
       const targetLane = Number(btn.dataset.lane);
-      btn.addEventListener('pointerdown', () => {
-        state.controlMethod = 'touch';
-        setLane(targetLane);
-      });
-      btn.addEventListener('pointerup', () => {
-        if (state.touchMode === 'hold' && targetLane !== 0) setLane(0);
-      });
-      btn.addEventListener('pointerleave', () => {
-        if (state.touchMode === 'hold' && targetLane !== 0) setLane(0);
-      });
+      btn.addEventListener('pointerdown', () => { state.controlMethod = 'touch'; setLane(targetLane); });
+      btn.addEventListener('pointerup', () => { if (state.touchMode === 'hold' && targetLane !== 0) setLane(0); });
+      btn.addEventListener('pointerleave', () => { if (state.touchMode === 'hold' && targetLane !== 0) setLane(0); });
     });
 
-    // Manual Throttle / Brake buttons
     $('btnThrottle').addEventListener('pointerdown', () => setThrottle(1));
     $('btnThrottle').addEventListener('pointerup', () => setThrottle(0));
     $('btnBrake').addEventListener('pointerdown', () => setThrottle(-1));
     $('btnBrake').addEventListener('pointerup', () => setThrottle(0));
 
-    // Export / Import JSON Save
     $('exportSaveBtn').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(saveData, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
@@ -1329,7 +1211,6 @@
       reader.readAsText(file);
     });
 
-    // Keyboard Controls
     window.addEventListener('keydown', (e) => {
       if (state.view !== 'game' || !state.running || state.paused) return;
       state.controlMethod = 'keyboard';
@@ -1343,17 +1224,13 @@
       }
     });
     window.addEventListener('keyup', (e) => {
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'w' || e.key === 'W') {
-        setThrottle(0);
-      }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'w' || e.key === 'W') setThrottle(0);
     });
-
-    window.addEventListener('resize', () => {
-      if (state.view === 'game') resizeCanvas();
-    });
+    window.addEventListener('resize', () => { if (state.view === 'game') resizeCanvas(); });
   }
 
-  window.addEventListener('load', () => {
+  // Boot immediately without waiting for external CDN scripts!
+  function boot() {
     bindEvents();
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') === 'controller') {
@@ -1363,5 +1240,11 @@
       updateConnectionUI();
       showView('home');
     }
-  });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 })();

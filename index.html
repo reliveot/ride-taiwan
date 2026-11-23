@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>《騎遍台灣》V2.0 單車環島復健遊戲</title>
   <link rel="stylesheet" href="css/style.css">
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -25,7 +25,7 @@
           <h1>《騎遍台灣》單車環島</h1>
           <span id="homeTourBadge" class="pill" style="background:rgba(255,255,255,0.2);color:#fff;border:none;">第 1 圈 0%</span>
         </div>
-        <p>三車道控車 × 台灣 9 站自動蓋章 × 連擊順風加速<br>支援電腦鍵盤、手機觸控與手機雙軸傾斜遙控。</p>
+        <p>三車道控車 × 沿途風景＋9站蓋章 × 連擊順風加速<br>支援電腦鍵盤、手機分屏觸控、手機本機陀螺儀與雙裝置遙控。</p>
       </section>
 
       <button id="startGameBtn" class="primary-btn" type="button">🚴 開始環島騎乘</button>
@@ -33,6 +33,22 @@
         <button id="openAlbumBtn" class="secondary-btn" type="button">📖 景點收藏冊 (0 / 9)</button>
         <button id="openHistoryBtn" class="secondary-btn" type="button">📊 騎乘紀錄與匯出入</button>
       </div>
+
+      <!-- Local Phone Gyroscope Quick Enable -->
+      <section class="panel-card">
+        <div class="panel-title">
+          <span>🧭 手機直接傾斜遊玩（本機陀螺儀）</span>
+          <span id="localGyroBadge" class="pill">未啟用</span>
+        </div>
+        <div style="font-size:0.78rem;color:#475569;line-height:1.4;">用手機直接玩時，請先點擊下方按鈕授權動作感測器（或直接用遊戲畫面的左右半邊觸控）。</div>
+        <div class="btn-row-2">
+          <button id="enableLocalGyroBtn" class="secondary-btn" type="button">📡 啟用手機陀螺儀</button>
+          <button id="calibrateLocalGyroBtn" class="icon-btn" type="button" style="justify-content:center;">🎯 校正中立位置</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;font-weight:700;cursor:pointer;">
+          <input id="localPitchToggle" type="checkbox"> 本機陀螺儀也啟用前後傾斜（前傾加速 / 後傾煞車）
+        </label>
+      </section>
 
       <!-- Mode & Rehab Grading -->
       <section class="panel-card">
@@ -93,14 +109,14 @@
         </div>
 
         <div class="setting-row">
-          <div class="setting-label"><span>速度控制與觸控模式</span></div>
+          <div class="setting-label"><span>速度控制與螢幕觸控方式</span></div>
           <div class="chip-group two-col">
             <button type="button" class="chip selected" data-spdctrl="auto">自動巡航</button>
             <button type="button" class="chip" data-spdctrl="manual">手動油門/煞車</button>
           </div>
           <div class="chip-group two-col" style="margin-top:4px;">
-            <button type="button" class="chip selected" data-touchmode="tap">觸控：點一下切換</button>
-            <button type="button" class="chip" data-touchmode="hold">觸控：按住維持</button>
+            <button type="button" class="chip selected" data-touchmode="hold">按住左右半邊（放開回中）</button>
+            <button type="button" class="chip" data-touchmode="tap">點一下左右半邊切換</button>
           </div>
         </div>
 
@@ -116,7 +132,7 @@
 
       <!-- Dual-Device Pairing -->
       <section class="panel-card">
-        <div class="panel-title"><span>📱 手機無線遙控配對</span></div>
+        <div class="panel-title"><span>📱 雙裝置遙控配對（手機遙控電腦）</span></div>
         <div class="qr-box">
           <div id="qrContainer"></div>
           <div style="flex:1;min-width:150px;">
@@ -150,7 +166,7 @@
         <div class="hud-row">
           <div class="hud-card" style="flex:1;">
             <div style="display:flex;justify-content:space-between;font-size:0.8rem;font-weight:800;margin-bottom:3px;">
-              <span id="hudStageTitle">🏙️ 台北 · 台北 101</span>
+              <span id="hudStageTitle">🏙️ 台北路段 → 前往 台北 101</span>
               <span id="hudModeInfo" style="color:#0f766e;">剩餘 03:00</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:0.74rem;font-weight:700;">
@@ -164,8 +180,9 @@
             <div style="font-size:0.74rem;font-weight:800;color:#475569;margin-top:3px;">距離 <span id="hudDistText">0</span></div>
           </div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
           <button id="endGameBtn" class="icon-btn" type="button" style="pointer-events:auto;color:#dc2626;">🏁 結束結算</button>
+          <button id="hudCalibrateBtn" class="icon-btn hidden" type="button" style="pointer-events:auto;color:#0f766e;">🎯 校正陀螺儀</button>
         </div>
         <div id="eventBanner" class="event-banner hidden"></div>
         <div id="disconnectBanner" class="event-banner warn hidden">⚠️ 手機連線中斷，已自動暫停等待重連...</div>
@@ -178,17 +195,24 @@
         <div id="postcardTitle" style="font-size:0.76rem;font-weight:900;color:#0f766e;text-align:center;margin-top:4px;"></div>
       </div>
 
+      <!-- Split-Screen Touch Overlay on Canvas -->
+      <div id="canvasTouchLayer" class="canvas-touch-layer">
+        <div id="touchZoneLeft" class="touch-half left"><span class="touch-hint">⬅️ 按左半邊</span></div>
+        <div id="touchZoneRight" class="touch-half right"><span class="touch-hint">按右半邊 ➡️</span></div>
+      </div>
+
       <canvas id="gameCanvas"></canvas>
 
+      <!-- Bottom Speed & Lane Bar -->
       <div class="test-controls">
-        <div class="lane-btn-row">
-          <button type="button" class="lane-btn" data-lane="-1">⬅️ 左車道 (←)</button>
-          <button type="button" class="lane-btn active" data-lane="0">⬆️ 中央 (空白)</button>
-          <button type="button" class="lane-btn" data-lane="1">➡️ 右車道 (→)</button>
-        </div>
         <div id="manualSpeedBar" class="speed-btn-row hidden">
-          <button id="btnBrake" type="button" class="speed-btn">🛑 按住煞車 (↓)</button>
+          <button id="btnBrake" type="button" class="speed-btn">🛑 按住減速 (↓)</button>
           <button id="btnThrottle" type="button" class="speed-btn">⚡ 按住加速 (↑)</button>
+        </div>
+        <div class="lane-btn-row">
+          <button type="button" class="lane-btn" data-lane="-1">⬅️ 左 (←)</button>
+          <button type="button" class="lane-btn active" data-lane="0">⬆️ 中央 (空白)</button>
+          <button type="button" class="lane-btn" data-lane="1">➡️ 右 (→)</button>
         </div>
       </div>
     </section>
