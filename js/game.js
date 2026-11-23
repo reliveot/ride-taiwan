@@ -73,6 +73,13 @@
     steerVel: 0,
     stoppedAtCorridor: false,
     corridorTransition: 0,
+    corridorCurL: -0.5,
+    corridorCurR: 0.5,
+    corridorInitSec: 0,
+    prevStationIdx: 0,
+    curStationIdx: 0,
+    biomeFade: 1,
+    emptyRoadSec: 0,
     touchMode: 'hold',
     thresholdDeg: 16,
     localGyroActive: false,
@@ -296,6 +303,10 @@
     state.steerVel = 0;
     state.stoppedAtCorridor = false;
     state.corridorTransition = 0;
+    state.corridorCurL = -0.5;
+    state.corridorCurR = 0.5;
+    state.corridorInitSec = 0;
+    state.emptyRoadSec = 0;
     state.stoppedAtConstruction = false;
     state.constructionWaitSec = 0;
     state.cyclistCooldown = 5;
@@ -329,7 +340,11 @@
       state.rng = Math.random;
     }
 
-    const startLm = LANDMARKS[getCurrentStationIndex()] || LANDMARKS[0];
+    const startIdx = getCurrentStationIndex();
+    state.prevStationIdx = startIdx;
+    state.curStationIdx = startIdx;
+    state.biomeFade = 1;
+    const startLm = LANDMARKS[startIdx] || LANDMARKS[0];
     state.roadOffset = state.lowMotion ? 0 : startLm.roadOffset;
 
     showView('game');
@@ -428,27 +443,20 @@
         state.waveQueue.push({ template: 'collect', lane, item, tight: true });
       }
       state.lastSpecialType = '';
-    } else if (roll < 0.42) {
-      // Randomized consecutive puddle/gravel stream with guaranteed reachable safe lane!
+    } else if (roll < 0.46) {
       const steps = state.level === 'L2' ? 3 : 4;
-      let safe = Math.floor(r() * 3) - 1;
+      const puddleLane = Math.floor(r() * 3) - 1;
       for (let i = 0; i < steps; i++) {
-        // Pick next reachable safe lane (step at most 1 lane so it's always passable!)
-        const choices = [-1, 0, 1].filter((l) => Math.abs(l - safe) <= 1);
-        safe = choices[Math.floor(r() * choices.length)];
-        const blockCount = (state.level === 'L2' && r() < 0.5) ? 1 : 2;
-        const others = [-1, 0, 1].filter((l) => l !== safe);
-        const blocked = blockCount === 2 ? others : [others[Math.floor(r() * others.length)]];
-        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: blocked, tight: true });
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [puddleLane], tight: true });
       }
       state.lastSpecialType = '';
-    } else if (roll < 0.58) {
-      const steps = state.level === 'L5' ? 5 : (state.level === 'L4' ? 4 : 3);
-      const start = r() < 0.5 ? -1 : 1;
-      const seq = start === -1 ? [-1, 0, 1, 0, -1] : [1, 0, -1, 0, 1];
+    } else if (roll < 0.60) {
+      const steps = state.level === 'L5' ? 3 : 2;
+      let safe = Math.floor(r() * 3) - 1;
       for (let i = 0; i < steps; i++) {
-        const safe = seq[i % seq.length];
-        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== safe), tight: true });
+        const choices = [-1, 0, 1].filter((l) => Math.abs(l - safe) <= 1);
+        safe = choices[Math.floor(r() * choices.length)];
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== safe), tight: false });
       }
       state.lastSpecialType = '';
     } else if (roll < 0.72 && cfg.allowCyclist && state.cyclistCooldown <= 0) {
@@ -504,8 +512,12 @@
         state.events.push({ template: 'obstacle', kind: 'bump', blockedLanes: next.blockedLanes, z: initialZ, resolved: false, tight: !!next.tight });
       }
     } else if (next.template === 'corridor') {
+      state.corridorCurL = -0.5;
+      state.corridorCurR = 0.5;
+      state.corridorInitSec = 0;
+      state.corridorTransition = 0;
       state.events.push({ template: 'corridor', seq: next.seq, segIndex: 0, segProgress: 0, failed: false, z: initialZ });
-      showBanner('🛣️ 道路縮減！請沿著唯一保留的車道行駛', 'boost');
+      showBanner('⚠️ 前方道路縮減！請準備進入安全車道', 'warn');
     }
   }
 
@@ -565,7 +577,15 @@
       writeSave(saveData);
     }
     AudioFX.playStamp();
-    $('postcardImg').src = lm.image;
+    if (lm.image) {
+      $('postcardImg').src = lm.image;
+      $('postcardImg').classList.remove('hidden');
+      $('postcardEmojiBox').classList.add('hidden');
+    } else {
+      $('postcardImg').classList.add('hidden');
+      $('postcardEmojiBox').textContent = lm.icon;
+      $('postcardEmojiBox').classList.remove('hidden');
+    }
     $('postcardTitle').textContent = lm.county + ' · ' + lm.name;
     $('postcardToast').classList.remove('hidden');
     clearTimeout(toastTimeout);
@@ -606,10 +626,16 @@
       state.bikeLean = state.lowMotion ? 0 : (state.lane - prevX) * 0.22;
     }
 
-    // Smoothly shift road left / center / right for current county biome!
-    const curLm = LANDMARKS[getCurrentStationIndex()] || LANDMARKS[0];
+    const curIdx = getCurrentStationIndex();
+    if (curIdx !== state.curStationIdx) {
+      state.prevStationIdx = state.curStationIdx;
+      state.curStationIdx = curIdx;
+      state.biomeFade = 0;
+    }
+    if (state.biomeFade < 1) state.biomeFade = Math.min(1, state.biomeFade + dt / 1.8);
+    const curLm = LANDMARKS[curIdx] || LANDMARKS[0];
     const targetOffset = state.lowMotion ? 0 : curLm.roadOffset;
-    state.roadOffset += (targetOffset - state.roadOffset) * Math.min(1, dt * 0.85);
+    state.roadOffset += (targetOffset - state.roadOffset) * Math.min(1, dt * 0.9);
 
     const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
     const spdScale = state.baseSpeedLevel === 'slow' ? 0.85 : (state.baseSpeedLevel === 'fast' ? 1.18 : 1.0);
@@ -651,6 +677,18 @@
 
     updateEventsQueue(dt);
 
+    if (state.events.length === 0) {
+      state.emptyRoadSec += dt;
+      if (state.emptyRoadSec > 2.2) {
+        state.stoppedAtCorridor = false;
+        state.stoppedAtConstruction = false;
+        state.followingCyclist = false;
+        state.emptyRoadSec = 0;
+        spawnNextEvent(1.0);
+      }
+    } else {
+      state.emptyRoadSec = 0;
+    }
     const hasCorridor = state.events.some((e) => e.template === 'corridor');
     if (!hasCorridor) {
       const freqShift = state.eventFreq === 'low' ? -0.10 : (state.eventFreq === 'high' ? 0.08 : 0);
@@ -736,11 +774,7 @@
             if (state.lane === ev.safeLane || state.constructionWaitSec >= 6.0) {
               if (state.constructionWaitSec >= 6.0) showBanner('👷 辛苦了！工作人員幫您開便道通過～', '');
               else { hideBanner(); recordEventOutcome(true, ev.safeLane); }
-              state.steerInput = 0;
-    state.steerVel = 0;
-    state.stoppedAtCorridor = false;
-    state.corridorTransition = 0;
-    state.stoppedAtConstruction = false;
+              state.stoppedAtConstruction = false;
               state.events.splice(i, 1);
             }
           }
@@ -788,23 +822,29 @@
       }
 
       if (ev.template === 'corridor') {
-        // 1.5s gradual narrowing transition before enforcing single lane
-        state.corridorTransition = Math.min(1, state.corridorTransition + dt / 1.5);
+        const laneOffsets = { '-1': [-0.5, -0.165], '0': [-0.165, 0.165], '1': [0.165, 0.5] };
         const targetLane = ev.seq[ev.segIndex];
+        const [tL, tR] = laneOffsets[String(targetLane)];
         const dirName = targetLane === -1 ? '左側' : (targetLane === 0 ? '中央' : '右側');
 
+        state.corridorInitSec += dt;
+        state.corridorTransition = Math.min(1, state.corridorInitSec / 1.5);
+        const glideSpeed = state.corridorTransition < 1 ? 2.6 : 2.2;
+        state.corridorCurL += (tL - state.corridorCurL) * Math.min(1, dt * glideSpeed);
+        state.corridorCurR += (tR - state.corridorCurR) * Math.min(1, dt * glideSpeed);
+
+        const curCenterLane = ((state.corridorCurL + state.corridorCurR) * 0.5) * 3;
         if (state.corridorTransition < 1) {
           showBanner('⚠️ 道路縮減中！請移至' + dirName + '安全車道', 'warn');
-          ev.z = Math.max(0.14, ev.z - approachRate * 0.4 * dt);
         } else {
-          const inSafe = Math.abs(state.bikeXNorm - targetLane) < 0.45;
+          const inSafe = Math.abs(state.bikeXNorm - curCenterLane) < 0.55;
           if (!inSafe) {
             state.stoppedAtCorridor = true;
             showBanner('🛑 路已縮減！請切入' + dirName + '車道才可前進', 'warn');
           } else {
             state.stoppedAtCorridor = false;
-            showBanner('🛣️ 沿著' + dirName + '安全車道前進中 (' + (ev.segIndex + 1) + '/' + ev.seq.length + ')', 'boost');
-            ev.segProgress += dt * 0.85;
+            showBanner('🛣️ 順著單線彎道前進 (' + (ev.segIndex + 1) + '/' + ev.seq.length + ' → ' + dirName + ')', 'boost');
+            ev.segProgress += dt * 0.65;
             if (ev.segProgress >= 1.0) {
               ev.segProgress = 0;
               ev.segIndex += 1;
@@ -816,7 +856,7 @@
                 state.boostTimer = 1.0;
                 state.accelCount += 1;
                 AudioFX.playBoost();
-                spawnFeedback(state.lane, '✨ 單線通道通過！加速 1 秒', '#0f766e');
+                spawnFeedback(state.lane, '✨ 單線彎道通過！加速 1 秒', '#0f766e');
                 state.events.splice(i, 1);
               }
             }
@@ -877,7 +917,15 @@
     return roadCenterX(depth, width) + lane * spread;
   }
 
-  function drawCountyHorizon(ctx, lm, w, horizonY, t) {
+  function lerpHex(a, b, t) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const r = Math.round(((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t);
+    const g = Math.round(((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t);
+    const bl = Math.round((pa & 255) * (1 - t) + (pb & 255) * t);
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
+  }
+
+  function drawCountyHorizon(ctx, lm, prevLm, fade, w, horizonY, t) {
     ctx.save();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
     state.clouds.forEach((c) => {
@@ -890,19 +938,29 @@
       ctx.fill();
     });
 
-    ctx.fillStyle = lm.theme.hillBack;
+    ctx.fillStyle = lerpHex(prevLm.theme.hillBack, lm.theme.hillBack, fade);
     ctx.beginPath();
     ctx.moveTo(0, horizonY);
     ctx.quadraticCurveTo(w * 0.25, horizonY - 50, w * 0.52, horizonY - 12);
     ctx.quadraticCurveTo(w * 0.78, horizonY - 58, w, horizonY - 8);
     ctx.lineTo(w, horizonY + 10); ctx.lineTo(0, horizonY + 10); ctx.closePath(); ctx.fill();
 
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
-    ctx.strokeStyle = 'rgba(15, 23, 42, 0.25)';
-    if (lm.id === 'taipei_101') {
-      ctx.fillRect(w * 0.72, horizonY - 34, 14, 34);
-      ctx.fillRect(w * 0.78, horizonY - 76, 16, 76);
-      ctx.fillRect(w * 0.83, horizonY - 94, 6, 18);
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.28)';
+    if (lm.id === 'keelung_zhengbin') {
+      ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#f472b6'].forEach((col, i) => {
+        ctx.fillStyle = col; ctx.fillRect(w * (0.08 + i * 0.07), horizonY - 26 - (i % 2) * 8, 18, 26 + (i % 2) * 8);
+      });
+    } else if (lm.id === 'taipei_101') {
+      ctx.fillRect(w * 0.72, horizonY - 34, 14, 34); ctx.fillRect(w * 0.78, horizonY - 76, 16, 76); ctx.fillRect(w * 0.83, horizonY - 94, 6, 18);
+    } else if (lm.id === 'tamsui_wharf') {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(w * 0.12, horizonY); ctx.lineTo(w * 0.24, horizonY - 54); ctx.lineTo(w * 0.36, horizonY); ctx.stroke();
+    } else if (lm.id === 'daxi_oldstreet' || lm.id === 'beigang_temple') {
+      ctx.fillStyle = 'rgba(185, 28, 28, 0.45)';
+      ctx.fillRect(w * 0.14, horizonY - 34, 48, 34);
+      ctx.beginPath(); ctx.moveTo(w * 0.10, horizonY - 34); ctx.lineTo(w * 0.22, horizonY - 50); ctx.lineTo(w * 0.34, horizonY - 34); ctx.fill();
     } else if (lm.id === 'nanliao' || lm.id === 'gaomei') {
       [0.64, 0.82].forEach((fx) => {
         const tx = w * fx, ty = horizonY - 48;
@@ -911,21 +969,31 @@
         for (let b = 0; b < 3; b++) { ctx.rotate((Math.PI * 2) / 3); ctx.fillRect(-1.5, 0, 3, 18); }
         ctx.restore();
       });
+    } else if (lm.id === 'longteng_bridge') {
+      ctx.fillStyle = 'rgba(180, 83, 9, 0.5)';
+      for (let a = 0; a < 4; a++) ctx.fillRect(w * (0.58 + a * 0.08), horizonY - 36, 12, 36);
+    } else if (lm.id === 'baguashan') {
+      ctx.beginPath(); ctx.arc(w * 0.78, horizonY - 34, 18, 0, Math.PI * 2); ctx.fillRect(w * 0.72, horizonY - 22, 34, 22); ctx.fill();
+    } else if (lm.id === 'sun_moon_lake') {
+      ctx.fillStyle = 'rgba(15, 118, 110, 0.45)'; ctx.fillRect(w * 0.22, horizonY - 56, 10, 56);
+    } else if (lm.id === 'alishan_forest') {
+      [0.65, 0.75, 0.85].forEach((tx) => {
+        ctx.fillStyle = 'rgba(21, 128, 61, 0.55)';
+        ctx.beginPath(); ctx.moveTo(w * tx, horizonY - 64); ctx.lineTo(w * tx - 14, horizonY); ctx.lineTo(w * tx + 14, horizonY); ctx.fill();
+      });
     } else if (lm.id === 'anping') {
       ctx.fillStyle = 'rgba(180, 83, 9, 0.35)'; ctx.fillRect(w * 0.65, horizonY - 24, 64, 24);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.65)'; ctx.fillRect(w * 0.74, horizonY - 52, 18, 28);
     } else if (lm.id === 'dragon_tiger') {
       [0.14, 0.25].forEach((px) => {
-        ctx.fillStyle = 'rgba(217, 119, 6, 0.40)';
-        ctx.fillRect(w * px, horizonY - 52, 16, 52);
-        ctx.fillRect(w * px - 3, horizonY - 38, 22, 5);
-        ctx.fillRect(w * px - 3, horizonY - 54, 22, 5);
+        ctx.fillStyle = 'rgba(217, 119, 6, 0.42)';
+        ctx.fillRect(w * px, horizonY - 52, 16, 52); ctx.fillRect(w * px - 3, horizonY - 38, 22, 5); ctx.fillRect(w * px - 3, horizonY - 54, 22, 5);
       });
     } else if (lm.id === 'eluanbi') {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.88)'; ctx.fillRect(w * 0.78, horizonY - 54, 14, 54);
       ctx.fillStyle = 'rgba(254, 240, 138, 0.45)';
       ctx.beginPath(); ctx.moveTo(w * 0.80, horizonY - 50); ctx.lineTo(w * 0.55, horizonY - 78); ctx.lineTo(w * 0.58, horizonY - 38); ctx.closePath(); ctx.fill();
-    } else if (lm.id === 'sanxiantai') {
+    } else if (lm.id === 'sanxiantai' || lm.id === 'penghu_bridge') {
       ctx.lineWidth = 3;
       for (let a = 0; a < 5; a++) { ctx.beginPath(); ctx.arc(w * (0.58 + a * 0.07), horizonY, 12, Math.PI, 0); ctx.stroke(); }
     } else if (lm.id === 'qixingtan') {
@@ -990,15 +1058,18 @@
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
-    const lm = LANDMARKS[getCurrentStationIndex()] || LANDMARKS[0];
+    const lm = LANDMARKS[state.curStationIdx] || LANDMARKS[0];
+    const prevLm = LANDMARKS[state.prevStationIdx] || lm;
+    const fade = state.biomeFade;
     const th = lm.theme;
 
     const sky = ctx.createLinearGradient(0, 0, 0, h * 0.42);
-    sky.addColorStop(0, th.skyTop); sky.addColorStop(1, th.skyBottom);
+    sky.addColorStop(0, lerpHex(prevLm.theme.skyTop, th.skyTop, fade));
+    sky.addColorStop(1, lerpHex(prevLm.theme.skyBottom, th.skyBottom, fade));
     ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h * 0.44);
 
     const horizonY = h * 0.40;
-    drawCountyHorizon(ctx, lm, w, horizonY, state.elapsedSec);
+    drawCountyHorizon(ctx, lm, prevLm, fade, w, horizonY, state.elapsedSec);
 
     const roadTopW = w * 0.20;
     const roadBotW = w * 0.76;
@@ -1010,12 +1081,9 @@
 
     if (activeCorridor) {
       const safeLane = activeCorridor.seq[activeCorridor.segIndex];
-      const laneOffsets = { '-1': [-0.5, -0.165], '0': [-0.165, 0.165], '1': [0.165, 0.5] };
-      const [tL, tR] = laneOffsets[String(safeLane)];
       const tr = state.corridorTransition;
-      // Smoothly interpolate road edges from full [-0.5, +0.5] down to [tL, tR]!
-      const fL = -0.5 + (tL - (-0.5)) * tr;
-      const fR = 0.5 + (tR - 0.5) * tr;
+      const fL = state.corridorCurL;
+      const fR = state.corridorCurR;
 
       // Fading closed road area
       ctx.fillStyle = 'rgba(15, 23, 42, ' + (0.35 * (1 - tr)).toFixed(2) + ')';
@@ -1231,7 +1299,10 @@
       const ok = saveData.unlockedIds.includes(lm.id);
       const card = document.createElement('div');
       card.className = 'album-item' + (ok ? '' : ' locked');
-      card.innerHTML = '<img src="' + lm.image + '" alt="' + lm.name + '"><div class="lbl">' + (ok ? '✅ ' : '🔒 ') + lm.county + '<br>' + lm.name + '</div>';
+      const thumb = lm.image
+        ? '<img src="' + lm.image + '" alt="' + lm.name + '">'
+        : '<div style="aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;font-size:2rem;background:linear-gradient(135deg,#ccfbf1,#fef3c7);border-radius:8px;">' + lm.icon + '</div>';
+      card.innerHTML = thumb + '<div class="lbl">' + (ok ? '✅ ' : '🔒 ') + lm.county + '<br>' + lm.name + '</div>';
       if (ok) {
         card.addEventListener('click', () => {
           $('albumDetailTitle').textContent = lm.icon + ' ' + lm.county + ' · ' + lm.name;

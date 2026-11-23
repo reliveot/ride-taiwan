@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>《騎遍台灣》V2.4 單車環島復健遊戲</title>
+  <title>《騎遍台灣》V2.6 單車環島復健遊戲</title>
   <link rel="stylesheet" href="css/style.css">
   <script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -11,7 +11,7 @@
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.4</span></div>
+      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.6</span></div>
       <div id="topActions" style="display:flex;align-items:center;gap:6px;">
         <span id="connStatusPill" class="pill sim">⌨️ 單機 / 觸控</span>
         <button id="muteBtn" class="icon-btn" type="button">🔊 音效</button>
@@ -25,12 +25,12 @@
           <h1>《騎遍台灣》單車環島</h1>
           <span id="homeTourBadge" class="pill" style="background:rgba(255,255,255,0.2);color:#fff;border:none;">第 1 圈 0%</span>
         </div>
-        <p>五級分級訓練 × 左右不對稱台灣路段 × 9 站蓋章明信片<br>支援電腦鍵盤、手機分屏觸控、手機本機陀螺儀與雙裝置遙控。</p>
+        <p>五級分級訓練 × 左右不對稱台灣路段 × 18 站環島蓋章<br>支援電腦鍵盤、手機分屏觸控、手機本機陀螺儀與雙裝置遙控。</p>
       </section>
 
       <button id="startGameBtn" class="primary-btn" type="button">🚴 開始環島騎乘</button>
       <div class="btn-row-2">
-        <button id="openAlbumBtn" class="secondary-btn" type="button">📖 景點收藏冊 (0 / 9)</button>
+        <button id="openAlbumBtn" class="secondary-btn" type="button">📖 景點收藏冊 (0 / 18)</button>
         <button id="openHistoryBtn" class="secondary-btn" type="button">📊 騎乘紀錄與匯出入</button>
       </div>
 
@@ -75,9 +75,9 @@
         <div id="sprintConfigRow" class="setting-row hidden">
           <div class="setting-label"><span>固定衝線賽道（公平比對最佳時間）</span></div>
           <select id="sprintRouteSelect" style="padding:8px;border-radius:10px;border:1px solid #cbd5e1;font-weight:700;">
-            <option value="west_coast">北中海線衝線（台北 → 台中）</option>
-            <option value="south_east">南東山海衝線（高雄 → 花蓮）</option>
-            <option value="full_island">全環島九站衝線（台北 → 宜蘭）</option>
+            <option value="west_coast">北中海線衝線（基隆 → 台中，7站）</option>
+            <option value="south_east">南東山海衝線（台南 → 宜蘭，6站）</option>
+            <option value="full_island">全環島 18 站壯遊衝線</option>
           </select>
         </div>
 
@@ -202,6 +202,7 @@
       <div id="postcardToast" class="postcard-toast hidden">
         <span class="postcard-stamp">已蓋章</span>
         <img id="postcardImg" src="" alt="景點明信片">
+        <div id="postcardEmojiBox" class="hidden" style="height:96px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:2.8rem;background:linear-gradient(135deg,#ccfbf1,#fef3c7);"></div>
         <div id="postcardTitle" style="font-size:0.76rem;font-weight:900;color:#0f766e;text-align:center;margin-top:4px;"></div>
       </div>
 
