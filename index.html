@@ -232,21 +232,16 @@
       </div>
 
       <div id="canvasTouchLayer" class="canvas-touch-layer">
-        <div id="touchZoneLeft" class="touch-half left"><span class="touch-hint">⬅️ 按左半邊</span></div>
-        <div id="touchZoneRight" class="touch-half right"><span class="touch-hint">按右半邊 ➡️</span></div>
+        <div id="touchZoneLeft" class="touch-half left"></div>
+        <div id="touchZoneRight" class="touch-half right"></div>
       </div>
 
       <canvas id="gameCanvas"></canvas>
 
-      <div class="test-controls">
-        <div id="manualSpeedBar" class="speed-btn-row hidden">
-          <button id="btnBrake" type="button" class="speed-btn">🛑 按住減速 (↓)</button>
-          <button id="btnThrottle" type="button" class="speed-btn">⚡ 按住加速 (↑)</button>
-        </div>
-        <div class="lane-btn-row" style="grid-template-columns:1fr 1fr;">
-          <button type="button" class="lane-btn" data-lane="-1">⬅️ 往左 (←)</button>
-          <button type="button" class="lane-btn" data-lane="1">往右 (→) ➡️</button>
-        </div>
+      <!-- Floating Translucent Speed Controls: Left Brake, Right Accelerate -->
+      <div id="manualSpeedBar" class="floating-speed-bar">
+        <button id="btnBrake" type="button" class="float-spd-btn brk">🛑 減速</button>
+        <button id="btnThrottle" type="button" class="float-spd-btn thr">⚡ 加速</button>
       </div>
     </section>
 

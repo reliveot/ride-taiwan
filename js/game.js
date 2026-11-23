@@ -349,7 +349,7 @@
     state.paused = false;
     state.pausedByDisconnect = false;
     $('disconnectBanner').classList.add('hidden');
-    $('manualSpeedBar').classList.toggle('hidden', state.speedControl !== 'manual');
+    $('manualSpeedBar').classList.remove('hidden');
     $('hudCalibrateBtn').classList.toggle('hidden', !state.localGyroActive);
 
     state.lane = 0;
@@ -403,7 +403,6 @@
     state.bridgeEndDist = -1;
     state.pendingPostcardIdx = -1;
     state.directorSegIdx = 0;
-    state.directorPlan = buildDirectorPlan(startLm);
 
     state.events = [];
     state.waveQueue = [];
@@ -423,7 +422,8 @@
     state.prevStationIdx = startIdx;
     state.curStationIdx = startIdx;
     state.biomeFade = 1;
-    const startLm = LANDMARKS[startIdx] || LANDMARKS[0];
+    const startLm = getActiveStationObj(startIdx);
+    state.directorPlan = buildDirectorPlan(startLm);
     state.roadOffset = state.lowMotion ? 0 : startLm.roadOffset;
 
     showView('game');

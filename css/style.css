@@ -638,3 +638,42 @@ details.resource-drawer summary {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   pointer-events: none;
 }
+
+/* Floating Translucent Speed Buttons (Left Brake, Right Accelerate) */
+.floating-speed-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.float-spd-btn {
+  pointer-events: auto;
+  padding: 12px 20px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  background: rgba(15, 23, 42, 0.36);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition: transform 0.1s ease, background 0.12s ease;
+}
+
+.float-spd-btn.active-brk {
+  background: rgba(220, 38, 38, 0.72);
+  transform: scale(0.96);
+}
+
+.float-spd-btn.active-thr {
+  background: rgba(234, 88, 12, 0.78);
+  transform: scale(0.96);
+}
