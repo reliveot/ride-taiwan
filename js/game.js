@@ -1,5 +1,5 @@
 /**
- * 《騎遍台灣》V2.1 — Multi-Object Arcade Pacing, Single-Strip Safe Lane & County Horizon Scenery
+ * 《騎遍台灣》V2.3 — 5-Level Difficulty, Shifting Road Offset & Asymmetric Biome Scenery
  */
 (function () {
   'use strict';
@@ -8,6 +8,14 @@
   const { TiltSensorEngine, RehabLink, requestWakeLock } = window.TiltRehabKit;
   const AudioFX = window.RehabAudio;
   const STORAGE_KEY = 'rtw_v2_save_data';
+
+  const LEVEL_CONFIG = {
+    L1: { name: 'L1 啟動練習', desc: 'L1 啟動練習：速度慢、單一補給與避障，適合動作建立。', speed: 95, cap: 1, gapZ: 0.44, segs: 2, allowWave: false, allowConstr: false, allowCyclist: false },
+    L2: { name: 'L2 穩定巡航', desc: 'L2 穩定巡航：速度稍快，加入雙道水窪、慢速車友與短通道。', speed: 120, cap: 2, gapZ: 0.56, segs: 2, allowWave: true, allowConstr: false, allowCyclist: true },
+    L3: { name: 'L3 進階復健', desc: 'L3 進階復健：中等速度、含施工停車引導與 3 段單線通道。', speed: 145, cap: 3, gapZ: 0.66, segs: 3, allowWave: true, allowConstr: true, allowCyclist: true },
+    L4: { name: 'L4 一般玩家', desc: 'L4 一般玩家：偏快節奏、S 形蛇行波、4 連補給與加速帶！', speed: 175, cap: 4, gapZ: 0.74, segs: 3, allowWave: true, allowConstr: true, allowCyclist: true },
+    L5: { name: 'L5 街機挑戰', desc: 'L5 街機挑戰：高速密集反應、4–5 連拍蛇行與短預警施工！', speed: 215, cap: 5, gapZ: 0.80, segs: 4, allowWave: true, allowConstr: true, allowCyclist: true }
+  };
 
   const $ = (id) => document.getElementById(id);
 
@@ -72,10 +80,11 @@
     bikeLean: 0,
     pedalPhase: 0,
     roadScroll: 0,
+    roadOffset: 0, // Smoothly lerps to current county's roadOffset!
     stamina: 100,
     distance: 0,
     elapsedSec: 0,
-    currentSpeedUnits: 155,
+    currentSpeedUnits: 95,
     combo: 0,
     maxCombo: 0,
     boostTimer: 0,
@@ -84,6 +93,11 @@
     followingCyclist: false,
     stoppedAtConstruction: false,
     constructionWaitSec: 0,
+
+    // Event Cooldowns & Mutual Exclusion
+    cyclistCooldown: 0,
+    constructionCooldown: 0,
+    lastSpecialType: '',
 
     collectedCount: 0,
     eventsTotal: 0,
@@ -98,7 +112,8 @@
     newUnlockedThisRun: [],
     completedStationsCount: 0,
 
-    events: [], // Multi-object queue!
+    events: [],
+    waveQueue: [],
     rng: Math.random,
     particles: [],
     floatingTexts: [],
@@ -152,9 +167,7 @@
   }
 
   function renderQRCode() {
-    const base = window.location.protocol.startsWith('http')
-      ? (window.location.origin + window.location.pathname)
-      : '';
+    const base = window.location.protocol.startsWith('http') ? (window.location.origin + window.location.pathname) : '';
     const ctrlUrl = base ? (base + '?mode=controller&room=' + state.roomCode) : ('RTW-ROOM:' + state.roomCode);
     const qrWrap = $('qrContainer');
     if (!qrWrap) return;
@@ -208,9 +221,7 @@
         if (data.type === 'ctrl') {
           state.controlMethod = data.source === 'touch' ? 'phone_touch' : 'phone_tilt';
           setLane(data.lane);
-          if (state.speedControl === 'manual' && typeof data.throttle === 'number') {
-            setThrottle(data.throttle);
-          }
+          if (state.speedControl === 'manual' && typeof data.throttle === 'number') setThrottle(data.throttle);
         } else if (data.type === 'calibrate') {
           setLane(0);
           setThrottle(0);
@@ -245,9 +256,7 @@
           if (state.running && !state.paused) {
             state.controlMethod = 'local_tilt';
             setLane(data.lane);
-            if (state.speedControl === 'manual' && state.localPitchEnabled) {
-              setThrottle(data.throttle);
-            }
+            if (state.speedControl === 'manual' && state.localPitchEnabled) setThrottle(data.throttle);
           }
         },
         onStatus: (st) => {
@@ -280,6 +289,9 @@
     state.followingCyclist = false;
     state.stoppedAtConstruction = false;
     state.constructionWaitSec = 0;
+    state.cyclistCooldown = 5;
+    state.constructionCooldown = 8;
+    state.lastSpecialType = '';
 
     state.collectedCount = 0;
     state.eventsTotal = 0;
@@ -295,6 +307,7 @@
     state.completedStationsCount = 0;
 
     state.events = [];
+    state.waveQueue = [];
     state.particles = [];
     state.floatingTexts = [];
     $('eventBanner').classList.add('hidden');
@@ -306,6 +319,9 @@
     } else {
       state.rng = Math.random;
     }
+
+    const startLm = LANDMARKS[getCurrentStationIndex()] || LANDMARKS[0];
+    state.roadOffset = state.lowMotion ? 0 : startLm.roadOffset;
 
     showView('game');
     resizeCanvas();
@@ -372,69 +388,102 @@
     showSummaryModal(record, isBest, sameCond.length > 0);
   }
 
-  // --- Multi-Object Event Spawner ---
-  function spawnNextEvent(initialZ = 1.0) {
+  // --- 5-Level Choreographed Wave & Cooldown Spawner ---
+  function enqueueWavePattern() {
     const r = state.rng;
+    const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
     const roll = r();
-    let type = 'collect';
-    if (state.stamina < 45 && roll < 0.42) type = 'collect';
-    else if (roll < 0.34) type = 'collect';
-    else if (roll < 0.80 || state.level === 'L1') type = 'obstacle';
-    else type = 'corridor';
 
-    // Don't spawn corridor if other events are still far on the road
-    if (type === 'corridor' && state.events.length > 0) {
-      type = 'obstacle';
+    // L1: Gentle single collectibles or 1-lane puddles
+    if (!cfg.allowWave) {
+      if (roll < 0.45) {
+        const item = COLLECTIBLES[Math.floor(r() * COLLECTIBLES.length)];
+        const lane = r() < 0.5 ? -1 : 1;
+        state.waveQueue.push({ template: 'collect', lane, item });
+      } else {
+        const safeLane = r() < 0.5 ? -1 : 1;
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-safeLane] });
+      }
+      state.lastSpecialType = '';
+      return;
     }
 
-    if (type === 'collect') {
+    // L2-L5: Mix collectibles, 2-lane waves, cyclist (15s CD), construction (20s CD), corridor (mutex with construction)
+    if (roll < 0.24) {
       const item = COLLECTIBLES[Math.floor(r() * COLLECTIBLES.length)];
-      const lane = state.level === 'L1' ? (r() < 0.5 ? -1 : 1) : (Math.floor(r() * 3) - 1);
-      state.events.push({ template: 'collect', lane, item, z: initialZ, resolved: false });
-      return;
-    }
-
-    if (type === 'obstacle') {
-      const kindRoll = r();
-      let kind = 'bump';
-      if (state.level !== 'L1') {
-        if (kindRoll > 0.82) kind = 'construction';
-        else if (kindRoll > 0.54) kind = 'cyclist';
-      } else if (kindRoll > 0.78) {
-        kind = 'cyclist';
+      const startLane = Math.floor(r() * 3) - 1;
+      const dir = startLane === -1 ? 1 : (startLane === 1 ? -1 : (r() < 0.5 ? 1 : -1));
+      const count = state.level === 'L2' ? 2 : 4;
+      for (let i = 0; i < count; i++) {
+        const lane = Math.max(-1, Math.min(1, startLane + (i >= 2 ? dir : 0)));
+        state.waveQueue.push({ template: 'collect', lane, item, tight: true });
       }
+      state.lastSpecialType = '';
+    } else if (roll < 0.54) {
+      const steps = state.level === 'L5' ? 5 : (state.level === 'L4' ? 4 : 3);
+      const start = r() < 0.5 ? -1 : 1;
+      const seq = start === -1 ? [-1, 0, 1, 0, -1] : [1, 0, -1, 0, 1];
+      for (let i = 0; i < steps; i++) {
+        const safe = seq[i % seq.length];
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== safe), tight: true });
+      }
+      state.lastSpecialType = '';
+    } else if (roll < 0.72 && cfg.allowCyclist && state.cyclistCooldown <= 0) {
+      state.cyclistCooldown = 15;
+      const safe1 = r() < 0.5 ? -1 : 1;
+      state.waveQueue.push({ template: 'obstacle', kind: 'cyclist', lane: safe1, tight: true });
+      if (state.level === 'L4' || state.level === 'L5') {
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== -safe1), tight: true });
+      }
+      state.lastSpecialType = 'cyclist';
+    } else if (roll < 0.85 && cfg.allowConstr && state.constructionCooldown <= 0 && state.lastSpecialType !== 'corridor') {
+      state.constructionCooldown = 20;
+      const boostLane = Math.floor(r() * 3) - 1;
+      state.waveQueue.push({ template: 'boostpad', lane: boostLane, tight: true });
+      const safeLane = Math.floor(r() * 3) - 1;
+      state.waveQueue.push({ template: 'obstacle', kind: 'construction', safeLane, blockedLanes: [-1, 0, 1].filter((l) => l !== safeLane) });
+      state.lastSpecialType = 'construction';
+    } else if (state.lastSpecialType !== 'construction') {
+      const segCount = cfg.segs;
+      const seq = [];
+      let cur = Math.floor(r() * 3) - 1;
+      for (let i = 0; i < segCount; i++) {
+        seq.push(cur);
+        const nextChoices = [-1, 0, 1].filter((l) => Math.abs(l - cur) <= 1);
+        cur = nextChoices[Math.floor(r() * nextChoices.length)];
+      }
+      state.waveQueue.push({ template: 'corridor', seq });
+      state.lastSpecialType = 'corridor';
+    } else {
+      const safe = Math.floor(r() * 3) - 1;
+      state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [-1, 0, 1].filter((l) => l !== safe) });
+      state.lastSpecialType = '';
+    }
+  }
 
-      if (kind === 'construction') {
-        const safeLane = Math.floor(r() * 3) - 1;
-        state.events.push({ template: 'obstacle', kind: 'construction', safeLane, blockedLanes: [-1, 0, 1].filter((l) => l !== safeLane), z: initialZ, resolved: false });
-        const dirText = safeLane === -1 ? '左側' : (safeLane === 0 ? '中央' : '右側');
+  function spawnNextEvent(initialZ = 1.0) {
+    if (state.waveQueue.length === 0) enqueueWavePattern();
+    const next = state.waveQueue.shift();
+    if (!next) return;
+
+    if (next.template === 'collect') {
+      state.events.push({ template: 'collect', lane: next.lane, item: next.item, z: initialZ, resolved: false, tight: !!next.tight });
+    } else if (next.template === 'boostpad') {
+      state.events.push({ template: 'boostpad', lane: next.lane, z: initialZ, resolved: false, tight: !!next.tight });
+    } else if (next.template === 'obstacle') {
+      if (next.kind === 'construction') {
+        const dirText = next.safeLane === -1 ? '左側' : (next.safeLane === 0 ? '中央' : '右側');
         showBanner('🚧 前方施工，請靠' + dirText + '通行！', 'warn');
-        return;
+        state.events.push({ template: 'obstacle', kind: 'construction', safeLane: next.safeLane, blockedLanes: next.blockedLanes, z: initialZ, resolved: false });
+      } else if (next.kind === 'cyclist') {
+        state.events.push({ template: 'obstacle', kind: 'cyclist', lane: next.lane, z: initialZ, resolved: false, tight: !!next.tight });
+      } else {
+        state.events.push({ template: 'obstacle', kind: 'bump', blockedLanes: next.blockedLanes, z: initialZ, resolved: false, tight: !!next.tight });
       }
-      if (kind === 'cyclist') {
-        const occLane = Math.floor(r() * 3) - 1;
-        state.events.push({ template: 'obstacle', kind: 'cyclist', lane: occLane, z: initialZ, resolved: false });
-        return;
-      }
-      const count = (state.level === 'L3' && r() < 0.45) ? 2 : 1;
-      const allLanes = [-1, 0, 1];
-      const blocked = [];
-      for (let i = 0; i < count; i++) blocked.push(allLanes.splice(Math.floor(r() * allLanes.length), 1)[0]);
-      state.events.push({ template: 'obstacle', kind: 'bump', blockedLanes: blocked, z: initialZ, resolved: false });
-      return;
+    } else if (next.template === 'corridor') {
+      state.events.push({ template: 'corridor', seq: next.seq, segIndex: 0, segProgress: 0, failed: false, z: initialZ });
+      showBanner('🛣️ 道路縮減！請沿著唯一保留的車道行駛', 'boost');
     }
-
-    // Template C: Single-Strip Narrow Road Corridor!
-    const segCount = state.level === 'L2' ? 2 : 3;
-    const seq = [];
-    let cur = Math.floor(r() * 3) - 1;
-    for (let i = 0; i < segCount; i++) {
-      seq.push(cur);
-      const nextChoices = [-1, 0, 1].filter((l) => Math.abs(l - cur) <= 1);
-      cur = nextChoices[Math.floor(r() * nextChoices.length)];
-    }
-    state.events.push({ template: 'corridor', seq, segIndex: 0, segProgress: 0, failed: false, z: initialZ });
-    showBanner('🛣️ 道路縮減！請沿著唯一保留的車道行駛', 'boost');
   }
 
   function showBanner(msg, cls) {
@@ -505,12 +554,11 @@
     if (state.boostTimer > 0) state.boostTimer = Math.max(0, state.boostTimer - dt);
     if (state.boostCooldown > 0) state.boostCooldown = Math.max(0, state.boostCooldown - dt);
     if (state.bumpTimer > 0) state.bumpTimer = Math.max(0, state.bumpTimer - dt);
+    if (state.cyclistCooldown > 0) state.cyclistCooldown = Math.max(0, state.cyclistCooldown - dt);
+    if (state.constructionCooldown > 0) state.constructionCooldown = Math.max(0, state.constructionCooldown - dt);
 
-    // Drift clouds gently
     if (!state.lowMotion) {
-      state.clouds.forEach((c) => {
-        c.x = (c.x + dt * 0.012 * c.s) % 1.15;
-      });
+      state.clouds.forEach((c) => { c.x = (c.x + dt * 0.012 * c.s) % 1.15; });
     }
 
     const drainRate = state.stoppedAtConstruction ? 0.2 : 0.4;
@@ -527,9 +575,14 @@
     state.bikeXNorm += (state.lane - state.bikeXNorm) * Math.min(1, dt * 13);
     state.bikeLean = state.lowMotion ? 0 : (state.lane - prevX) * 0.22;
 
-    // Brisk arcade-friendly base speeds (L1 slow stays gentle, medium/fast feel snappy!)
-    const baseSpeedMap = { slow: 105, medium: 155, fast: 215 };
-    const baseSpd = baseSpeedMap[state.baseSpeedLevel] || 155;
+    // Smoothly shift road left / center / right for current county biome!
+    const curLm = LANDMARKS[getCurrentStationIndex()] || LANDMARKS[0];
+    const targetOffset = state.lowMotion ? 0 : curLm.roadOffset;
+    state.roadOffset += (targetOffset - state.roadOffset) * Math.min(1, dt * 0.85);
+
+    const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
+    const spdScale = state.baseSpeedLevel === 'slow' ? 0.85 : (state.baseSpeedLevel === 'fast' ? 1.18 : 1.0);
+    const baseSpd = cfg.speed * spdScale;
     const staminaFactor = 0.55 + 0.45 * (state.stamina / 100);
     let speedMult = staminaFactor;
 
@@ -538,7 +591,6 @@
       else if (state.throttle === -1) speedMult *= 0.45;
     }
 
-    // Safety assist on nearest obstacle
     const frontObs = state.events.find((e) => e.template === 'obstacle' && e.z < 0.40 && e.z > 0.16);
     if (state.safetyAssist && frontObs) {
       const inDanger = (frontObs.kind === 'bump' && frontObs.blockedLanes.includes(state.lane)) ||
@@ -557,7 +609,6 @@
     state.pedalPhase += dt * (state.currentSpeedUnits * 0.065);
     state.roadScroll = (state.roadScroll + dt * (state.currentSpeedUnits * 0.013)) % 1;
 
-    // Scenery first -> Stamp postcard after completing each 1000-unit county stretch
     const completed = Math.floor(state.distance / UNITS_PER_STATION);
     if (completed > state.completedStationsCount) {
       const finishedIdx = (getCurrentStationIndex() - 1 + LANDMARKS.length) % LANDMARKS.length;
@@ -565,17 +616,16 @@
       triggerPassingLandmark(finishedIdx);
     }
 
-    // Update all events in queue
     updateEventsQueue(dt);
 
-    // Multi-object spawning: spawn new event when road horizon clears enough space
     const hasCorridor = state.events.some((e) => e.template === 'corridor');
     if (!hasCorridor) {
-      const levelCap = state.level === 'L1' ? 1 : (state.level === 'L2' ? 2 : 3);
-      const freqShift = state.eventFreq === 'low' ? -0.14 : (state.eventFreq === 'high' ? 0.12 : 0);
-      const spawnGapZ = Math.min(0.84, Math.max(0.38, (state.level === 'L1' ? 0.46 : (state.level === 'L2' ? 0.64 : 0.74)) + freqShift));
+      const freqShift = state.eventFreq === 'low' ? -0.10 : (state.eventFreq === 'high' ? 0.08 : 0);
+      const inWave = state.waveQueue.length > 0 && state.waveQueue[0].tight;
+      const baseGap = inWave ? 0.81 : cfg.gapZ;
+      const spawnGapZ = Math.min(0.86, Math.max(0.38, baseGap + freqShift));
       const maxZ = state.events.reduce((m, e) => Math.max(m, e.z), 0);
-      if (state.events.length < levelCap && (state.events.length === 0 || maxZ <= spawnGapZ)) {
+      if (state.events.length < cfg.cap && (state.events.length === 0 || maxZ <= spawnGapZ)) {
         spawnNextEvent(1.0);
       }
     }
@@ -599,6 +649,21 @@
 
     for (let i = state.events.length - 1; i >= 0; i--) {
       const ev = state.events[i];
+
+      if (ev.template === 'boostpad') {
+        ev.z -= approachRate * dt;
+        if (!ev.resolved && ev.z <= 0.17 && Math.abs(state.bikeXNorm - ev.lane) < 0.42) {
+          ev.resolved = true;
+          state.boostTimer = 1.5;
+          state.accelCount += 1;
+          AudioFX.playBoost();
+          spawnFeedback(ev.lane, '⚡ 順風加速帶！', '#0284c7');
+          state.events.splice(i, 1);
+          continue;
+        }
+        if (ev.z <= 0.02) state.events.splice(i, 1);
+        continue;
+      }
 
       if (ev.template === 'collect') {
         ev.z -= approachRate * dt;
@@ -726,7 +791,7 @@
   function updateHUD() {
     const idx = getCurrentStationIndex();
     const lm = LANDMARKS[idx] || LANDMARKS[0];
-    $('hudStageTitle').textContent = lm.icon + ' ' + lm.county + '風景 → 前往 ' + lm.name;
+    $('hudStageTitle').textContent = lm.icon + ' ' + lm.county + '路段 → ' + lm.name;
 
     if (state.mode === 'timed') {
       const rem = Math.max(0, state.timedMinutes * 60 - Math.floor(state.elapsedSec));
@@ -751,17 +816,20 @@
     canvas.height = Math.max(380, Math.floor(rect.height));
   }
 
-  function laneToScreenX(lane, depth, width) {
-    const spreadBottom = width * 0.29;
-    const spreadTop = width * 0.05;
-    const spread = spreadBottom * (1 - depth) + spreadTop * depth;
-    return width * 0.5 + lane * spread;
+  function roadCenterX(depth, width) {
+    // Horizon shifts slightly less than bottom for natural 2.5D perspective
+    return width * (0.5 + state.roadOffset * (0.45 + 0.55 * (1 - depth)));
   }
 
-  // --- Rich County Horizon Silhouettes ---
+  function laneToScreenX(lane, depth, width) {
+    const spreadBottom = width * 0.25;
+    const spreadTop = width * 0.05;
+    const spread = spreadBottom * (1 - depth) + spreadTop * depth;
+    return roadCenterX(depth, width) + lane * spread;
+  }
+
   function drawCountyHorizon(ctx, lm, w, horizonY, t) {
     ctx.save();
-    // Drifting clouds
     ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
     state.clouds.forEach((c) => {
       const cx = (c.x * w) % (w + 60) - 30;
@@ -773,87 +841,99 @@
       ctx.fill();
     });
 
-    // Distant Mountains
     ctx.fillStyle = lm.theme.hillBack;
     ctx.beginPath();
     ctx.moveTo(0, horizonY);
     ctx.quadraticCurveTo(w * 0.25, horizonY - 50, w * 0.52, horizonY - 12);
     ctx.quadraticCurveTo(w * 0.78, horizonY - 58, w, horizonY - 8);
-    ctx.lineTo(w, horizonY + 10);
-    ctx.lineTo(0, horizonY + 10);
-    ctx.closePath();
-    ctx.fill();
+    ctx.lineTo(w, horizonY + 10); ctx.lineTo(0, horizonY + 10); ctx.closePath(); ctx.fill();
 
-    // County-specific Landmark Silhouette
     ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
     ctx.strokeStyle = 'rgba(15, 23, 42, 0.25)';
     if (lm.id === 'taipei_101') {
-      // Taipei 101 + city skyline
-      ctx.fillRect(w * 0.70, horizonY - 34, 14, 34);
-      ctx.fillRect(w * 0.76, horizonY - 76, 16, 76);
-      ctx.fillRect(w * 0.81, horizonY - 94, 6, 18);
-      ctx.fillRect(w * 0.84, horizonY - 40, 18, 40);
+      ctx.fillRect(w * 0.72, horizonY - 34, 14, 34);
+      ctx.fillRect(w * 0.78, horizonY - 76, 16, 76);
+      ctx.fillRect(w * 0.83, horizonY - 94, 6, 18);
     } else if (lm.id === 'nanliao' || lm.id === 'gaomei') {
-      // Spinning Wind Turbines + Kites
-      [0.20, 0.76].forEach((fx) => {
+      [0.64, 0.82].forEach((fx) => {
         const tx = w * fx, ty = horizonY - 48;
         ctx.fillRect(tx - 2, ty, 4, 48);
-        ctx.save();
-        ctx.translate(tx, ty);
-        ctx.rotate(t * 1.4);
-        for (let b = 0; b < 3; b++) {
-          ctx.rotate((Math.PI * 2) / 3);
-          ctx.fillRect(-1.5, 0, 3, 18);
-        }
+        ctx.save(); ctx.translate(tx, ty); ctx.rotate(t * 1.4);
+        for (let b = 0; b < 3; b++) { ctx.rotate((Math.PI * 2) / 3); ctx.fillRect(-1.5, 0, 3, 18); }
         ctx.restore();
       });
     } else if (lm.id === 'anping') {
-      // Anping Red Brick Fort + Watchtower
-      ctx.fillStyle = 'rgba(180, 83, 9, 0.35)';
-      ctx.fillRect(w * 0.65, horizonY - 24, 64, 24);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-      ctx.fillRect(w * 0.74, horizonY - 52, 18, 28);
+      ctx.fillStyle = 'rgba(180, 83, 9, 0.35)'; ctx.fillRect(w * 0.65, horizonY - 24, 64, 24);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)'; ctx.fillRect(w * 0.74, horizonY - 52, 18, 28);
     } else if (lm.id === 'dragon_tiger') {
-      // Twin Pagodas
-      [0.72, 0.83].forEach((px) => {
-        ctx.fillStyle = 'rgba(217, 119, 6, 0.38)';
+      [0.14, 0.25].forEach((px) => {
+        ctx.fillStyle = 'rgba(217, 119, 6, 0.40)';
         ctx.fillRect(w * px, horizonY - 52, 16, 52);
         ctx.fillRect(w * px - 3, horizonY - 38, 22, 5);
         ctx.fillRect(w * px - 3, horizonY - 54, 22, 5);
       });
     } else if (lm.id === 'eluanbi') {
-      // White Lighthouse + rotating beam
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.fillRect(w * 0.78, horizonY - 54, 14, 54);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)'; ctx.fillRect(w * 0.78, horizonY - 54, 14, 54);
       ctx.fillStyle = 'rgba(254, 240, 138, 0.45)';
-      ctx.beginPath();
-      ctx.moveTo(w * 0.80, horizonY - 50);
-      ctx.lineTo(w * 0.55, horizonY - 78);
-      ctx.lineTo(w * 0.58, horizonY - 38);
-      ctx.closePath();
-      ctx.fill();
+      ctx.beginPath(); ctx.moveTo(w * 0.80, horizonY - 50); ctx.lineTo(w * 0.55, horizonY - 78); ctx.lineTo(w * 0.58, horizonY - 38); ctx.closePath(); ctx.fill();
     } else if (lm.id === 'sanxiantai') {
-      // 8-Arch Bridge silhouette
       ctx.lineWidth = 3;
-      for (let a = 0; a < 5; a++) {
-        ctx.beginPath();
-        ctx.arc(w * (0.58 + a * 0.07), horizonY, 12, Math.PI, 0);
-        ctx.stroke();
-      }
+      for (let a = 0; a < 5; a++) { ctx.beginPath(); ctx.arc(w * (0.58 + a * 0.07), horizonY, 12, Math.PI, 0); ctx.stroke(); }
     } else if (lm.id === 'qixingtan') {
-      // Dramatic East Coast Peaks
       ctx.fillStyle = 'rgba(4, 120, 87, 0.35)';
-      ctx.beginPath();
-      ctx.moveTo(0, horizonY); ctx.lineTo(w * 0.22, horizonY - 72); ctx.lineTo(w * 0.45, horizonY);
-      ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, horizonY); ctx.lineTo(w * 0.22, horizonY - 72); ctx.lineTo(w * 0.45, horizonY); ctx.fill();
     } else if (lm.id === 'waiao') {
-      // Guishan Island silhouette on horizon
-      ctx.beginPath();
-      ctx.moveTo(w * 0.62, horizonY);
-      ctx.quadraticCurveTo(w * 0.74, horizonY - 32, w * 0.88, horizonY);
-      ctx.fill();
+      ctx.beginPath(); ctx.moveTo(w * 0.62, horizonY); ctx.quadraticCurveTo(w * 0.74, horizonY - 32, w * 0.88, horizonY); ctx.fill();
     }
     ctx.restore();
+  }
+
+  // Asymmetric Biome Ground & Side Feature Painting!
+  function drawAsymmetricBiome(ctx, lm, w, h, horizonY, roadTopW, roadBotW) {
+    const topCX = roadCenterX(1, w);
+    const botCX = roadCenterX(0, w);
+
+    ctx.fillStyle = lm.theme.ground;
+    ctx.fillRect(0, horizonY, w, h - horizonY);
+
+    // Paint water/ocean/wetland/paddy on the expanded side!
+    if (lm.biome === 'river_left' || lm.biome === 'harbor_left') {
+      ctx.fillStyle = lm.biome === 'river_left' ? '#38bdf8' : '#0ea5e9';
+      ctx.beginPath();
+      ctx.moveTo(0, horizonY);
+      ctx.lineTo(topCX - roadTopW * 0.65, horizonY);
+      ctx.lineTo(botCX - roadBotW * 0.65, h);
+      ctx.lineTo(0, h);
+      ctx.closePath();
+      ctx.fill();
+    } else if (lm.biome === 'ocean_right' || lm.biome === 'wetland_right' || lm.biome === 'cliff_ocean' || lm.biome === 'paddy_ocean') {
+      ctx.fillStyle = lm.biome === 'wetland_right' ? '#fdba74' : '#0284c7';
+      ctx.beginPath();
+      ctx.moveTo(topCX + roadTopW * 0.65, horizonY);
+      ctx.lineTo(w, horizonY);
+      ctx.lineTo(w, h);
+      ctx.lineTo(botCX + roadBotW * 0.65, h);
+      ctx.closePath();
+      ctx.fill();
+      // White beach surf line
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(topCX + roadTopW * 0.68, horizonY);
+      ctx.lineTo(botCX + roadBotW * 0.68, h);
+      ctx.stroke();
+
+      if (lm.biome === 'cliff_ocean') {
+        // Left steep mountain wall
+        ctx.fillStyle = '#065f46';
+        ctx.beginPath();
+        ctx.moveTo(0, horizonY);
+        ctx.lineTo(topCX - roadTopW * 0.55, horizonY);
+        ctx.lineTo(0, h * 0.72);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
   }
 
   function renderScene() {
@@ -865,114 +945,102 @@
     const th = lm.theme;
 
     const sky = ctx.createLinearGradient(0, 0, 0, h * 0.42);
-    sky.addColorStop(0, th.skyTop);
-    sky.addColorStop(1, th.skyBottom);
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, h * 0.44);
+    sky.addColorStop(0, th.skyTop); sky.addColorStop(1, th.skyBottom);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h * 0.44);
 
     const horizonY = h * 0.40;
     drawCountyHorizon(ctx, lm, w, horizonY, state.elapsedSec);
 
-    ctx.fillStyle = th.ground;
-    ctx.fillRect(0, horizonY, w, h - horizonY);
+    const roadTopW = w * 0.20;
+    const roadBotW = w * 0.76;
+    drawAsymmetricBiome(ctx, lm, w, h, horizonY, roadTopW, roadBotW);
 
-    const roadTopW = w * 0.22;
-    const roadBotW = w * 0.92;
-
-    // Check if Narrow Single-Lane Corridor is active!
+    const topCX = roadCenterX(1, w);
+    const botCX = roadCenterX(0, w);
     const activeCorridor = state.events.find((e) => e.template === 'corridor');
 
     if (activeCorridor) {
-      // Other 2 lanes disappear! Draw ONLY the single active safe road strip
       const safeLane = activeCorridor.seq[activeCorridor.segIndex];
       const laneOffsets = { '-1': [-0.5, -0.165], '0': [-0.165, 0.165], '1': [0.165, 0.5] };
       const [fL, fR] = laneOffsets[String(safeLane)];
 
-      // Dimmed grass/closed shoulder background
       ctx.fillStyle = 'rgba(15, 23, 42, 0.08)';
       ctx.beginPath();
-      ctx.moveTo(w * 0.5 - roadTopW * 0.5, horizonY);
-      ctx.lineTo(w * 0.5 + roadTopW * 0.5, horizonY);
-      ctx.lineTo(w * 0.5 + roadBotW * 0.5, h);
-      ctx.lineTo(w * 0.5 - roadBotW * 0.5, h);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(topCX - roadTopW * 0.5, horizonY); ctx.lineTo(topCX + roadTopW * 0.5, horizonY);
+      ctx.lineTo(botCX + roadBotW * 0.5, h); ctx.lineTo(botCX - roadBotW * 0.5, h);
+      ctx.closePath(); ctx.fill();
 
-      // Draw ONLY the surviving single lane!
       ctx.fillStyle = th.road;
       ctx.beginPath();
-      ctx.moveTo(w * 0.5 + roadTopW * fL, horizonY);
-      ctx.lineTo(w * 0.5 + roadTopW * fR, horizonY);
-      ctx.lineTo(w * 0.5 + roadBotW * fR, h);
-      ctx.lineTo(w * 0.5 + roadBotW * fL, h);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(topCX + roadTopW * fL, horizonY); ctx.lineTo(topCX + roadTopW * fR, horizonY);
+      ctx.lineTo(botCX + roadBotW * fR, h); ctx.lineTo(botCX + roadBotW * fL, h);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 4; ctx.stroke();
 
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-
-      // Forward arrows inside the single lane
       ctx.fillStyle = 'rgba(74, 222, 128, 0.75)';
       for (let i = 0; i < 4; i++) {
         const z = ((i + state.roadScroll) / 4);
         const p = Math.pow(z, 1.5);
         const ay = horizonY + p * (h - horizonY);
         const ax = laneToScreenX(safeLane, 1 - p, w);
-        ctx.font = Math.round(12 + p * 16) + 'px sans-serif';
-        ctx.textAlign = 'center';
+        ctx.font = Math.round(12 + p * 16) + 'px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText('▲', ax, ay);
       }
     } else {
-      // Standard 3-Lane Road
       ctx.fillStyle = th.road;
       ctx.beginPath();
-      ctx.moveTo(w * 0.5 - roadTopW * 0.5, horizonY);
-      ctx.lineTo(w * 0.5 + roadTopW * 0.5, horizonY);
-      ctx.lineTo(w * 0.5 + roadBotW * 0.5, h);
-      ctx.lineTo(w * 0.5 - roadBotW * 0.5, h);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(topCX - roadTopW * 0.5, horizonY); ctx.lineTo(topCX + roadTopW * 0.5, horizonY);
+      ctx.lineTo(botCX + roadBotW * 0.5, h); ctx.lineTo(botCX - roadBotW * 0.5, h);
+      ctx.closePath(); ctx.fill();
 
-      ctx.strokeStyle = 'rgba(255,255,255,0.65)';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 2.5;
       for (let i = 0; i < 8; i++) {
         const z0 = ((i + state.roadScroll) / 8);
         const z1 = Math.min(1, z0 + 0.06);
-        const y0 = horizonY + Math.pow(z0, 1.55) * (h - horizonY);
-        const y1 = horizonY + Math.pow(z1, 1.55) * (h - horizonY);
-        const half0 = (roadTopW + (roadBotW - roadTopW) * Math.pow(z0, 1.55)) * 0.5;
-        const half1 = (roadTopW + (roadBotW - roadTopW) * Math.pow(z1, 1.55)) * 0.5;
+        const p0 = Math.pow(z0, 1.55), p1 = Math.pow(z1, 1.55);
+        const y0 = horizonY + p0 * (h - horizonY), y1 = horizonY + p1 * (h - horizonY);
+        const cx0 = roadCenterX(1 - p0, w), cx1 = roadCenterX(1 - p1, w);
+        const half0 = (roadTopW + (roadBotW - roadTopW) * p0) * 0.5;
+        const half1 = (roadTopW + (roadBotW - roadTopW) * p1) * 0.5;
         [-0.33, 0.33].forEach((f) => {
-          ctx.beginPath();
-          ctx.moveTo(w * 0.5 + half0 * f, y0);
-          ctx.lineTo(w * 0.5 + half1 * f, y1);
-          ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(cx0 + half0 * f, y0); ctx.lineTo(cx1 + half1 * f, y1); ctx.stroke();
         });
       }
     }
 
-    // Roadside Scenery Objects (Trees + Lamps + County Props)
+    // Asymmetric Roadside Props (Left vs Right differ!)
     for (let i = 0; i < 7; i++) {
       const z = ((i + state.roadScroll) / 7);
       const p = Math.pow(z, 1.6);
       const y = horizonY + p * (h - horizonY);
+      const cx = roadCenterX(1 - p, w);
       const halfRoad = (roadTopW + (roadBotW - roadTopW) * p) * 0.5;
       const scale = 0.25 + p * 0.95;
-      [-1, 1].forEach((side) => {
-        const tx = w * 0.5 + side * (halfRoad + 26 * scale);
-        ctx.fillStyle = '#78350f';
-        ctx.fillRect(tx - 3 * scale, y - 16 * scale, 6 * scale, 16 * scale);
+
+      // Left prop
+      const lx = cx - halfRoad - 22 * scale;
+      if (lm.biome === 'river_left' || lm.biome === 'harbor_left') {
+        ctx.fillStyle = '#0284c7'; ctx.fillRect(lx, y - 14 * scale, 4 * scale, 14 * scale); // Railing post
+      } else if (lm.biome === 'oldtown_asym') {
+        ctx.fillStyle = '#b45309'; ctx.fillRect(lx - 14 * scale, y - 24 * scale, 20 * scale, 24 * scale); // Red brick house
+      } else {
+        ctx.fillStyle = '#78350f'; ctx.fillRect(lx - 3 * scale, y - 16 * scale, 6 * scale, 16 * scale);
+        ctx.fillStyle = th.accent; ctx.beginPath(); ctx.arc(lx, y - 24 * scale, 14 * scale, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Right prop
+      const rx = cx + halfRoad + 22 * scale;
+      if (lm.biome === 'ocean_right' || lm.biome === 'cliff_ocean' || lm.biome === 'paddy_ocean') {
+        ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(rx + 6 * scale, y - 6 * scale, 9 * scale, 0, Math.PI * 2); ctx.fill(); // Coastal rocks/tetrapods
+      } else {
+        ctx.fillStyle = '#78350f'; ctx.fillRect(rx - 3 * scale, y - 16 * scale, 6 * scale, 16 * scale);
         ctx.fillStyle = lm.id === 'taipei_101' ? '#f9a8d4' : th.accent;
-        ctx.beginPath();
-        ctx.arc(tx, y - 24 * scale, 14 * scale, 0, Math.PI * 2);
-        ctx.fill();
-      });
+        ctx.beginPath(); ctx.arc(rx, y - 24 * scale, 14 * scale, 0, Math.PI * 2); ctx.fill();
+      }
     }
 
     if (state.boostTimer > 0 && !state.lowMotion) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'; ctx.lineWidth = 2;
       for (let i = 0; i < 6; i++) {
         const lx = (i % 2 === 0 ? 18 : w - 18) + (Math.random() * 14 - 7);
         const ly = h * 0.2 + Math.random() * h * 0.6;
@@ -980,10 +1048,18 @@
       }
     }
 
-    // Multi-Object Queue Rendering (draw furthest first so closer objects overlap cleanly!)
     const sorted = [...state.events].sort((a, b) => b.z - a.z);
     sorted.forEach((ev) => {
-      if (ev.template === 'collect') {
+      if (ev.template === 'boostpad') {
+        const p = 1 - ev.z;
+        const y = horizonY + Math.pow(p, 1.45) * (h * 0.78 - horizonY);
+        const x = laneToScreenX(ev.lane, ev.z, w);
+        const r = 14 + p * 20;
+        ctx.fillStyle = '#0ea5e9'; ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.roundRect(x - r, y - r * 0.6, r * 2, r * 1.2, 8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#ffffff'; ctx.font = 'bold ' + Math.round(r * 0.9) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('⚡', x, y);
+      } else if (ev.template === 'collect') {
         const p = 1 - ev.z;
         const y = horizonY + Math.pow(p, 1.45) * (h * 0.78 - horizonY);
         const x = laneToScreenX(ev.lane, ev.z, w);
@@ -1048,8 +1124,7 @@
     ctx.rotate(lean);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
     ctx.beginPath(); ctx.ellipse(0, 34, 28, 8, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#1e293b';
-    ctx.beginPath(); ctx.roundRect(-7, 4, 14, 32, 6); ctx.fill();
+    ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.roundRect(-7, 4, 14, 32, 6); ctx.fill();
     ctx.strokeStyle = '#0f766e'; ctx.lineWidth = 6;
     ctx.beginPath(); ctx.moveTo(0, 12); ctx.lineTo(0, -14); ctx.stroke();
     ctx.strokeStyle = '#334155'; ctx.lineWidth = 5;
@@ -1241,10 +1316,13 @@
       });
     });
     $('sprintRouteSelect').addEventListener('change', (e) => { state.sprintRouteId = e.target.value; });
+
     document.querySelectorAll('[data-level]').forEach((b) => {
       b.addEventListener('click', () => {
         state.level = b.dataset.level;
         document.querySelectorAll('[data-level]').forEach((x) => x.classList.toggle('selected', x === b));
+        const cfg = LEVEL_CONFIG[state.level];
+        if (cfg && $('levelDescText')) $('levelDescText').textContent = cfg.desc;
       });
     });
     document.querySelectorAll('[data-basespd]').forEach((b) => {

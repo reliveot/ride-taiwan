@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>《騎遍台灣》V2.0 單車環島復健遊戲</title>
+  <title>《騎遍台灣》V2.3 單車環島復健遊戲</title>
   <link rel="stylesheet" href="css/style.css">
   <script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -11,7 +11,7 @@
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.0</span></div>
+      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.3</span></div>
       <div id="topActions" style="display:flex;align-items:center;gap:6px;">
         <span id="connStatusPill" class="pill sim">⌨️ 單機 / 觸控</span>
         <button id="muteBtn" class="icon-btn" type="button">🔊 音效</button>
@@ -25,7 +25,7 @@
           <h1>《騎遍台灣》單車環島</h1>
           <span id="homeTourBadge" class="pill" style="background:rgba(255,255,255,0.2);color:#fff;border:none;">第 1 圈 0%</span>
         </div>
-        <p>三車道控車 × 沿途風景＋9站蓋章 × 連擊順風加速<br>支援電腦鍵盤、手機分屏觸控、手機本機陀螺儀與雙裝置遙控。</p>
+        <p>五級分級訓練 × 左右不對稱台灣路段 × 9 站蓋章明信片<br>支援電腦鍵盤、手機分屏觸控、手機本機陀螺儀與雙裝置遙控。</p>
       </section>
 
       <button id="startGameBtn" class="primary-btn" type="button">🚴 開始環島騎乘</button>
@@ -50,9 +50,9 @@
         </label>
       </section>
 
-      <!-- Mode & Rehab Grading -->
+      <!-- Mode & 5-Level Rehab Grading -->
       <section class="panel-card">
-        <div class="panel-title"><span>🏁 遊戲模式與復健分級</span></div>
+        <div class="panel-title"><span>🏁 遊戲模式與五級難度設定</span></div>
 
         <div class="setting-row">
           <div class="setting-label"><span>賽制選擇</span></div>
@@ -82,20 +82,23 @@
         </div>
 
         <div class="setting-row">
-          <div class="setting-label"><span>動作與路況分級</span></div>
-          <div class="chip-group">
-            <button type="button" class="chip selected" data-level="L1">L1 基礎<br><span style="font-size:0.68rem;color:#64748b;">左右收集+慢車友</span></button>
-            <button type="button" class="chip" data-level="L2">L2 進階<br><span style="font-size:0.68rem;color:#64748b;">含施工與通道</span></button>
-            <button type="button" class="chip" data-level="L3">L3 挑戰<br><span style="font-size:0.68rem;color:#64748b;">連續彎道與雙障</span></button>
+          <div class="setting-label"><span>五級難度分級（L1–L3 復健 / L4–L5 一般與街機）</span></div>
+          <div class="chip-group" style="grid-template-columns:repeat(5,1fr);">
+            <button type="button" class="chip selected" data-level="L1">L1<br><span style="font-size:0.66rem;color:#64748b;">啟動</span></button>
+            <button type="button" class="chip" data-level="L2">L2<br><span style="font-size:0.66rem;color:#64748b;">穩定</span></button>
+            <button type="button" class="chip" data-level="L3">L3<br><span style="font-size:0.66rem;color:#64748b;">進階</span></button>
+            <button type="button" class="chip" data-level="L4">L4<br><span style="font-size:0.66rem;color:#64748b;">一般</span></button>
+            <button type="button" class="chip" data-level="L5">L5<br><span style="font-size:0.66rem;color:#64748b;">挑戰</span></button>
           </div>
+          <div id="levelDescText" style="font-size:0.75rem;color:#0f766e;font-weight:700;">L1 啟動練習：速度慢、單一補給與避障，適合動作建立。</div>
         </div>
 
         <div class="setting-row">
-          <div class="setting-label"><span>基礎車速（與事件頻率獨立）</span></div>
+          <div class="setting-label"><span>基礎車速微調（與事件頻率獨立）</span></div>
           <div class="chip-group">
-            <button type="button" class="chip" data-basespd="slow">🐢 慢速</button>
-            <button type="button" class="chip selected" data-basespd="medium">🚲 中速</button>
-            <button type="button" class="chip" data-basespd="fast">⚡ 快速</button>
+            <button type="button" class="chip" data-basespd="slow">🐢 偏慢</button>
+            <button type="button" class="chip selected" data-basespd="medium">🚲 標準</button>
+            <button type="button" class="chip" data-basespd="fast">⚡ 偏快</button>
           </div>
         </div>
 
@@ -166,7 +169,7 @@
         <div class="hud-row">
           <div class="hud-card" style="flex:1;">
             <div style="display:flex;justify-content:space-between;font-size:0.8rem;font-weight:800;margin-bottom:3px;">
-              <span id="hudStageTitle">🏙️ 台北路段 → 前往 台北 101</span>
+              <span id="hudStageTitle">🏙️ 台北河濱段 → 台北 101</span>
               <span id="hudModeInfo" style="color:#0f766e;">剩餘 03:00</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:0.74rem;font-weight:700;">
@@ -188,14 +191,12 @@
         <div id="disconnectBanner" class="event-banner warn hidden">⚠️ 手機連線中斷，已自動暫停等待重連...</div>
       </div>
 
-      <!-- Non-intrusive Corner Passing Postcard -->
       <div id="postcardToast" class="postcard-toast hidden">
         <span class="postcard-stamp">已蓋章</span>
         <img id="postcardImg" src="" alt="景點明信片">
         <div id="postcardTitle" style="font-size:0.76rem;font-weight:900;color:#0f766e;text-align:center;margin-top:4px;"></div>
       </div>
 
-      <!-- Split-Screen Touch Overlay on Canvas -->
       <div id="canvasTouchLayer" class="canvas-touch-layer">
         <div id="touchZoneLeft" class="touch-half left"><span class="touch-hint">⬅️ 按左半邊</span></div>
         <div id="touchZoneRight" class="touch-half right"><span class="touch-hint">按右半邊 ➡️</span></div>
@@ -203,7 +204,6 @@
 
       <canvas id="gameCanvas"></canvas>
 
-      <!-- Bottom Speed & Lane Bar -->
       <div class="test-controls">
         <div id="manualSpeedBar" class="speed-btn-row hidden">
           <button id="btnBrake" type="button" class="speed-btn">🛑 按住減速 (↓)</button>
@@ -311,7 +311,7 @@
     </div>
   </div>
 
-  <!-- History & Export/Import Modal -->
+  <!-- History Modal -->
   <div id="historyModal" class="modal-backdrop hidden">
     <div class="modal-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
