@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>《騎遍台灣》V2.3 單車環島復健遊戲</title>
+  <title>《騎遍台灣》V2.4 單車環島復健遊戲</title>
   <link rel="stylesheet" href="css/style.css">
   <script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -11,7 +11,7 @@
 <body>
   <div class="app-shell">
     <header class="top-bar">
-      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.3</span></div>
+      <div class="brand-title">🚲 騎遍台灣 <span class="pill" style="font-size:0.7rem;">V2.4</span></div>
       <div id="topActions" style="display:flex;align-items:center;gap:6px;">
         <span id="connStatusPill" class="pill sim">⌨️ 單機 / 觸控</span>
         <button id="muteBtn" class="icon-btn" type="button">🔊 音效</button>
@@ -66,9 +66,9 @@
         <div id="timedConfigRow" class="setting-row">
           <div class="setting-label"><span>限時長度</span></div>
           <div class="chip-group">
-            <button type="button" class="chip selected" data-mins="3">3 分鐘</button>
-            <button type="button" class="chip" data-mins="5">5 分鐘</button>
-            <button type="button" class="chip" data-mins="10">10 分鐘</button>
+            <button type="button" class="chip" data-mins="1">1 分鐘</button>
+            <button type="button" class="chip selected" data-mins="2">2 分鐘</button>
+            <button type="button" class="chip" data-mins="3">3 分鐘</button>
           </div>
         </div>
 
@@ -108,6 +108,14 @@
             <button type="button" class="chip" data-freq="low">稀疏</button>
             <button type="button" class="chip selected" data-freq="medium">適中</button>
             <button type="button" class="chip" data-freq="high">密集</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label"><span>轉向手感模式</span></div>
+          <div class="chip-group two-col">
+            <button type="button" class="chip selected" data-steer="smooth">連續平滑位移（推薦）</button>
+            <button type="button" class="chip" data-steer="lanes">三車道定位（復健格狀）</button>
           </div>
         </div>
 
@@ -170,7 +178,7 @@
           <div class="hud-card" style="flex:1;">
             <div style="display:flex;justify-content:space-between;font-size:0.8rem;font-weight:800;margin-bottom:3px;">
               <span id="hudStageTitle">🏙️ 台北河濱段 → 台北 101</span>
-              <span id="hudModeInfo" style="color:#0f766e;">剩餘 03:00</span>
+              <span id="hudModeInfo" style="color:#0f766e;">剩餘 02:00</span>
             </div>
             <div style="display:flex;align-items:center;gap:6px;font-size:0.74rem;font-weight:700;">
               <span>🔋 體力</span>
@@ -209,10 +217,9 @@
           <button id="btnBrake" type="button" class="speed-btn">🛑 按住減速 (↓)</button>
           <button id="btnThrottle" type="button" class="speed-btn">⚡ 按住加速 (↑)</button>
         </div>
-        <div class="lane-btn-row">
-          <button type="button" class="lane-btn" data-lane="-1">⬅️ 左 (←)</button>
-          <button type="button" class="lane-btn active" data-lane="0">⬆️ 中央 (空白)</button>
-          <button type="button" class="lane-btn" data-lane="1">➡️ 右 (→)</button>
+        <div class="lane-btn-row" style="grid-template-columns:1fr 1fr;">
+          <button type="button" class="lane-btn" data-lane="-1">⬅️ 往左 (←)</button>
+          <button type="button" class="lane-btn" data-lane="1">往右 (→) ➡️</button>
         </div>
       </div>
     </section>

@@ -60,7 +60,7 @@
     muted: false,
 
     mode: 'timed',
-    timedMinutes: 3,
+    timedMinutes: 2,
     sprintRouteId: 'west_coast',
     level: 'L1',
     baseSpeedLevel: 'medium',
@@ -68,6 +68,8 @@
     speedControl: 'auto',
     safetyAssist: true,
     lowMotion: false,
+    steeringMode: 'smooth',
+    steerInput: 0,
     touchMode: 'hold',
     thresholdDeg: 16,
     localGyroActive: false,
@@ -220,7 +222,7 @@
         if (!data) return;
         if (data.type === 'ctrl') {
           state.controlMethod = data.source === 'touch' ? 'phone_touch' : 'phone_tilt';
-          setLane(data.lane);
+          if (state.steeringMode === 'smooth') state.steerInput = data.lane; else setLane(data.lane);
           if (state.speedControl === 'manual' && typeof data.throttle === 'number') setThrottle(data.throttle);
         } else if (data.type === 'calibrate') {
           setLane(0);
@@ -255,7 +257,7 @@
         onUpdate: (data) => {
           if (state.running && !state.paused) {
             state.controlMethod = 'local_tilt';
-            setLane(data.lane);
+            if (state.steeringMode === 'smooth') state.steerInput = data.lane; else setLane(data.lane);
             if (state.speedControl === 'manual' && state.localPitchEnabled) setThrottle(data.throttle);
           }
         },
@@ -419,7 +421,15 @@
         state.waveQueue.push({ template: 'collect', lane, item, tight: true });
       }
       state.lastSpecialType = '';
-    } else if (roll < 0.54) {
+    } else if (roll < 0.38) {
+      // Continuous diagonal puddle/gravel stream (fun to weave around in smooth mode!)
+      const dir = r() < 0.5 ? 1 : -1;
+      const lanes = dir === 1 ? [-1, 0, 1] : [1, 0, -1];
+      lanes.forEach((bl) => {
+        state.waveQueue.push({ template: 'obstacle', kind: 'bump', blockedLanes: [bl], tight: true });
+      });
+      state.lastSpecialType = '';
+    } else if (roll < 0.58) {
       const steps = state.level === 'L5' ? 5 : (state.level === 'L4' ? 4 : 3);
       const start = r() < 0.5 ? -1 : 1;
       const seq = start === -1 ? [-1, 0, 1, 0, -1] : [1, 0, -1, 0, 1];
@@ -561,7 +571,7 @@
       state.clouds.forEach((c) => { c.x = (c.x + dt * 0.012 * c.s) % 1.15; });
     }
 
-    const drainRate = state.stoppedAtConstruction ? 0.2 : 0.4;
+    const drainRate = state.stoppedAtConstruction ? 0.8 : 2.0;
     state.stamina = Math.max(0, state.stamina - drainRate * dt);
 
     if (state.mode === 'timed' && state.elapsedSec >= state.timedMinutes * 60) { endGame('timeup'); return; }
@@ -572,8 +582,14 @@
     }
 
     const prevX = state.bikeXNorm;
-    state.bikeXNorm += (state.lane - state.bikeXNorm) * Math.min(1, dt * 13);
-    state.bikeLean = state.lowMotion ? 0 : (state.lane - prevX) * 0.22;
+    if (state.steeringMode === 'smooth') {
+      state.bikeXNorm = Math.max(-1.05, Math.min(1.05, state.bikeXNorm + state.steerInput * 1.95 * dt));
+      state.bikeLean = state.lowMotion ? 0 : state.steerInput * 0.16;
+      state.lane = state.bikeXNorm < -0.34 ? -1 : (state.bikeXNorm > 0.34 ? 1 : 0);
+    } else {
+      state.bikeXNorm += (state.lane - state.bikeXNorm) * Math.min(1, dt * 13);
+      state.bikeLean = state.lowMotion ? 0 : (state.lane - prevX) * 0.22;
+    }
 
     // Smoothly shift road left / center / right for current county biome!
     const curLm = LANDMARKS[getCurrentStationIndex()] || LANDMARKS[0];
@@ -587,8 +603,10 @@
     let speedMult = staminaFactor;
 
     if (state.speedControl === 'manual') {
-      if (state.throttle === 1) speedMult *= 1.25;
+      if (state.throttle === 1) speedMult *= 1.30;
       else if (state.throttle === -1) speedMult *= 0.45;
+    } else if (state.throttle !== 0) {
+      speedMult *= (state.throttle === 1 ? 1.18 : 0.65);
     }
 
     const frontObs = state.events.find((e) => e.template === 'obstacle' && e.z < 0.40 && e.z > 0.16);
@@ -1337,7 +1355,13 @@
         document.querySelectorAll('[data-freq]').forEach((x) => x.classList.toggle('selected', x === b));
       });
     });
-    document.querySelectorAll('[data-spdctrl]').forEach((b) => {
+    document.querySelectorAll('[data-steer]').forEach((b) => {
+      b.addEventListener('click', () => {
+        state.steeringMode = b.dataset.steer;
+        document.querySelectorAll('[data-steer]').forEach((x) => x.classList.toggle('selected', x === b));
+      });
+    });
+        document.querySelectorAll('[data-spdctrl]').forEach((b) => {
       b.addEventListener('click', () => {
         state.speedControl = b.dataset.spdctrl;
         document.querySelectorAll('[data-spdctrl]').forEach((x) => x.classList.toggle('selected', x === b));
@@ -1366,17 +1390,29 @@
       showView('home');
     });
 
-    const bindSplitTouch = (el, targetLane) => {
+    const applySteerDown = (dir) => {
+      state.controlMethod = 'touch';
+      if (state.steeringMode === 'smooth') {
+        state.steerInput = dir;
+      } else {
+        setLane(Math.max(-1, Math.min(1, state.lane + dir)));
+      }
+    };
+    const applySteerUp = (dir) => {
+      if (state.steeringMode === 'smooth' && state.steerInput === dir) {
+        state.steerInput = 0;
+      }
+    };
+
+    const bindSplitTouch = (el, dir) => {
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        state.controlMethod = 'touch';
         el.classList.add('pressed');
-        if (state.touchMode === 'tap' && state.lane === targetLane) setLane(0);
-        else setLane(targetLane);
+        applySteerDown(dir);
       });
       const release = () => {
         el.classList.remove('pressed');
-        if (state.touchMode === 'hold') setLane(0);
+        applySteerUp(dir);
       };
       el.addEventListener('pointerup', release);
       el.addEventListener('pointercancel', release);
@@ -1386,10 +1422,10 @@
     bindSplitTouch($('touchZoneRight'), 1);
 
     document.querySelectorAll('.lane-btn').forEach((btn) => {
-      const targetLane = Number(btn.dataset.lane);
-      btn.addEventListener('pointerdown', () => { state.controlMethod = 'touch'; setLane(targetLane); });
-      btn.addEventListener('pointerup', () => { if (state.touchMode === 'hold' && targetLane !== 0) setLane(0); });
-      btn.addEventListener('pointerleave', () => { if (state.touchMode === 'hold' && targetLane !== 0) setLane(0); });
+      const dir = Number(btn.dataset.lane);
+      btn.addEventListener('pointerdown', () => applySteerDown(dir));
+      btn.addEventListener('pointerup', () => applySteerUp(dir));
+      btn.addEventListener('pointerleave', () => applySteerUp(dir));
     });
 
     $('btnThrottle').addEventListener('pointerdown', () => setThrottle(1));
@@ -1425,17 +1461,26 @@
     window.addEventListener('keydown', (e) => {
       if (state.view !== 'game' || !state.running || state.paused) return;
       state.controlMethod = 'keyboard';
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') setLane(-1);
-      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') setLane(1);
-      else if (e.key === ' ' || e.key === 's' || e.key === 'S') setLane(0);
-      else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') setThrottle(1);
-      else if (e.key === 'ArrowDown') {
-        if (state.speedControl === 'manual') setThrottle(-1);
-        else setLane(0);
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        if (state.steeringMode === 'smooth') state.steerInput = -1;
+        else if (!e.repeat) setLane(Math.max(-1, state.lane - 1));
+      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        if (state.steeringMode === 'smooth') state.steerInput = 1;
+        else if (!e.repeat) setLane(Math.min(1, state.lane + 1));
+      } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+        setThrottle(1);
+      } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+        setThrottle(-1);
       }
     });
     window.addEventListener('keyup', (e) => {
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'w' || e.key === 'W') setThrottle(0);
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        if (state.steerInput === -1) state.steerInput = 0;
+      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        if (state.steerInput === 1) state.steerInput = 0;
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'w' || e.key === 'W' || e.key === 's' || e.key === 'S') {
+        setThrottle(0);
+      }
     });
     window.addEventListener('resize', () => { if (state.view === 'game') resizeCanvas(); });
   }

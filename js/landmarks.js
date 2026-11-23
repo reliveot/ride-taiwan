@@ -14,7 +14,7 @@
       subtitle: '台北河濱段 · 城市與櫻花起點',
       description: '從台北河濱出發，左側是波光粼粼的淡水河岸，右側是粉紅櫻花與台北 101，正式展開台灣環島單車旅程！',
       image: 'images/landmark_01.jpg',
-      roadOffset: 0.13, // Road shifts right -> Left opens up for river & railing
+      roadOffset: 0.22, // Road shifts right -> Left opens up for river & railing
       biome: 'river_left',
       theme: { skyTop: '#BAE6FD', skyBottom: '#FEF3C7', hillBack: '#86EFAC', hillFront: '#4ADE80', ground: '#DCFCE7', accent: '#0F766E', road: '#475569' }
     },
@@ -27,7 +27,7 @@
       subtitle: '新竹海風段 · 十七公里海岸線',
       description: '騎上新竹南寮海濱車道，左側防風林迎風搖曳，右側藍白鐘樓與海天一線在陽光下閃耀。',
       image: 'images/landmark_02.jpg',
-      roadOffset: -0.13, // Road shifts left -> Right opens up for ocean & kites
+      roadOffset: -0.22, // Road shifts left -> Right opens up for ocean & kites
       biome: 'ocean_right',
       theme: { skyTop: '#7DD3FC', skyBottom: '#E0F2FE', hillBack: '#38BDF8', hillFront: '#0EA5E9', ground: '#FEF9C3', accent: '#0284C7', road: '#475569' }
     },
@@ -40,7 +40,7 @@
       subtitle: '台中濕地夕陽段 · 天空之鏡',
       description: '沿著台中海線前行，右側夕陽濕地映出橘紅晚霞，遠方白色風車緩緩轉動陪伴旅人。',
       image: 'images/landmark_03.jpg',
-      roadOffset: -0.14,
+      roadOffset: -0.22,
       biome: 'wetland_right',
       theme: { skyTop: '#FDA4AF', skyBottom: '#FDE68A', hillBack: '#FDBA74', hillFront: '#FB923C', ground: '#FFEDD5', accent: '#EA580C', road: '#57534E' }
     },
@@ -66,7 +66,7 @@
       subtitle: '高雄港都段 · 蓮池潭畔陽光',
       description: '來到南台灣高雄，左側港灣與蓮池水面閃耀陽光，右側椰子樹迎風擺動，為單車旅人加油打氣！',
       image: 'images/landmark_05.jpg',
-      roadOffset: 0.13,
+      roadOffset: 0.22,
       biome: 'harbor_left',
       theme: { skyTop: '#7DD3FC', skyBottom: '#FEF9C3', hillBack: '#34D399', hillFront: '#10B981', ground: '#ECFDF5', accent: '#D97706', road: '#475569' }
     },
@@ -79,7 +79,7 @@
       subtitle: '屏東海岸段 · 最南端的守護光',
       description: '迎著南國海風抵達墾丁，左側熱帶草坡與右側湛藍巴士海峽一路相伴，遠方白燈塔閃耀光芒。',
       image: 'images/landmark_06.jpg',
-      roadOffset: -0.11,
+      roadOffset: -0.20,
       biome: 'ocean_right',
       theme: { skyTop: '#60A5FA', skyBottom: '#E0F2FE', hillBack: '#22C55E', hillFront: '#16A34A', ground: '#DCFCE7', accent: '#0369A1', road: '#475569' }
     },
@@ -92,7 +92,7 @@
       subtitle: '台東海線段 · 太平洋晨光',
       description: '轉入東台灣台 11 線，右側太平洋浪花拍打礁岩與消波塊，紅白八拱橋迎接溫暖的晨光與海風。',
       image: 'images/landmark_07.jpg',
-      roadOffset: -0.15,
+      roadOffset: -0.22,
       biome: 'ocean_right',
       theme: { skyTop: '#FBCFE8', skyBottom: '#FDE68A', hillBack: '#0EA5E9', hillFront: '#0284C7', ground: '#F0F9FF', accent: '#E11D48', road: '#475569' }
     },
@@ -105,7 +105,7 @@
       subtitle: '花蓮山海段 · 斷崖與月牙灣',
       description: '沿著花蓮濱海自行車道奔馳，左側是高聳山壁，右側是遼闊的太平洋月牙礫石海灣。',
       image: 'images/landmark_08.jpg',
-      roadOffset: -0.15,
+      roadOffset: -0.22,
       biome: 'cliff_ocean',
       theme: { skyTop: '#BAE6FD', skyBottom: '#F0FDF4', hillBack: '#059669', hillFront: '#047857', ground: '#E0F2FE', accent: '#0D9488', road: '#475569' }
     },
@@ -118,7 +118,7 @@
       subtitle: '宜蘭蘭陽段 · 龜山島與環島圓滿',
       description: '最後一站來到宜蘭外澳，左側翠綠蘭陽水田、右側沙灘浪花與海上龜山島，恭喜完成環島一圈！',
       image: 'images/landmark_09.jpg',
-      roadOffset: -0.13,
+      roadOffset: -0.22,
       biome: 'paddy_ocean',
       theme: { skyTop: '#A5F3FC', skyBottom: '#FEF3C7', hillBack: '#4ADE80', hillFront: '#22C55E', ground: '#ECFDF5', accent: '#0F766E', road: '#475569' }
     }
@@ -131,16 +131,16 @@
   ];
 
   const COLLECTIBLES = [
-    { id: 'banana', name: '旗山香蕉', icon: '🍌', stamina: 12, color: '#EAB308' },
-    { id: 'water', name: '運動水壺', icon: '🧴', stamina: 10, color: '#0EA5E9' },
-    { id: 'boba', name: '珍珠奶茶', icon: '🧋', stamina: 14, color: '#D97706' },
-    { id: 'onigiri', name: '池上飯糰', icon: '🍙', stamina: 12, color: '#10B981' }
+    { id: 'banana', name: '旗山香蕉', icon: '🍌', stamina: 8, color: '#EAB308' },
+    { id: 'water', name: '運動水壺', icon: '🧴', stamina: 6, color: '#0EA5E9' },
+    { id: 'boba', name: '珍珠奶茶', icon: '🧋', stamina: 9, color: '#D97706' },
+    { id: 'onigiri', name: '池上飯糰', icon: '🍙', stamina: 8, color: '#10B981' }
   ];
 
   global.RideTaiwanData = {
     LANDMARKS,
     SPRINT_ROUTES,
     COLLECTIBLES,
-    UNITS_PER_STATION: 1000
+    UNITS_PER_STATION: 1600
   };
 })(window);
