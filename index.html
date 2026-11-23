@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>《騎遍台灣》單車環島復健遊戲 V1.0</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="brand-title">🚲 騎遍台灣 <span style="font-size:0.72rem;font-weight:700;color:#64748b;">V1.0</span></div>
+      <div id="topActions" style="display:flex;align-items:center;gap:6px;">
+        <span id="connStatusPill" class="pill sim">⌨️ 單機測試模式</span>
+        <button id="muteBtn" class="icon-btn" type="button">🔊 音效</button>
+      </div>
+    </header>
+
+    <!-- 1. Home & Settings View -->
+    <main id="homeView" class="scroll-body">
+      <section class="hero-card">
+        <h1>《騎遍台灣》單車環島</h1>
+        <p>手機左右傾斜控制 × 台灣 9 大景點收集<br>專為動作控制訓練與輕鬆旅行設計，不限時、不扣分，依自己的節奏騎出好心情！</p>
+      </section>
+
+      <button id="startGameBtn" class="primary-btn" type="button">🚴 開始單車環島</button>
+      <button id="openAlbumBtn" class="secondary-btn" type="button">📖 查看台灣景點收藏冊 (0 / 9)</button>
+
+      <!-- Dual-Device Pairing Panel -->
+      <section class="panel-card">
+        <div class="panel-title">
+          <span>📱 雙裝置手機控制器配對</span>
+          <span style="font-size:0.75rem;color:#64748b;">電腦/iPad 顯示 ＋ 手機傾斜</span>
+        </div>
+        <div class="qr-box">
+          <div id="qrContainer"></div>
+          <div style="flex:1;min-width:160px;">
+            <div style="font-size:0.8rem;color:#64748b;font-weight:700;">配對房號</div>
+            <div id="roomCodeDisplay" class="room-code-big">----</div>
+            <div id="homeConnText" style="font-size:0.8rem;color:#475569;line-height:1.4;margin-top:4px;">等待手機連線...</div>
+          </div>
+        </div>
+        <button id="openControllerBtn" class="icon-btn" type="button" style="justify-content:center;padding:10px;">📲 開啟手機控制器畫面</button>
+      </section>
+
+      <!-- Rehab Difficulty Settings -->
+      <section class="panel-card">
+        <div class="panel-title"><span>⚙️ 復健難度與控制設定</span></div>
+
+        <div class="setting-row">
+          <div class="setting-label">
+            <span>左右傾斜角度門檻</span>
+            <span id="thresholdVal" style="color:#0f766e;">18°</span>
+          </div>
+          <input id="thresholdSlider" type="range" min="8" max="38" step="2" value="18">
+          <div style="font-size:0.76rem;color:#64748b;">角度越小越省力；角度越大動作幅度越大</div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label"><span>防抖穩定度（手抖容錯）</span></div>
+          <div class="chip-group">
+            <button type="button" class="chip" data-stability="low">低（靈敏）</button>
+            <button type="button" class="chip selected" data-stability="medium">中（推薦）</button>
+            <button type="button" class="chip" data-stability="high">高（穩重）</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label"><span>每站解鎖收集數量</span></div>
+          <div class="chip-group">
+            <button type="button" class="chip" data-items="3">3 個（輕鬆）</button>
+            <button type="button" class="chip selected" data-items="5">5 個（標準）</button>
+            <button type="button" class="chip" data-items="8">8 個（進階）</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label"><span>回正休息機制</span></div>
+          <div class="chip-group two-col">
+            <button type="button" class="chip selected" data-center="true">每次回中央（V1.0預設）</button>
+            <button type="button" class="chip" data-center="false">自由左右切換</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label"><span>目標出現位置</span></div>
+          <div class="chip-group two-col">
+            <button type="button" class="chip selected" data-lanemode="lr">左右雙區（V1.0預設）</button>
+            <button type="button" class="chip" data-lanemode="lcr">左中右三區</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Collapsible 吱吱復健 Resource Drawer -->
+      <details class="resource-drawer">
+        <summary>📚 吱吱復健｜延伸衛教與練習資源 ▾</summary>
+        <div class="resource-links">
+          <a class="resource-link" href="https://reliveot.github.io/stroke-rehab-guide/" target="_blank" rel="noopener"><span>🧠 中風復健攻略</span><span>↗</span></a>
+          <a class="resource-link" href="https://reliveot.github.io/parkinsons-rehab-guide/" target="_blank" rel="noopener"><span>🌿 帕金森氏症生活復健指南</span><span>↗</span></a>
+          <a class="resource-link" href="https://reliveot.github.io/stroke-hand-course/" target="_blank" rel="noopener"><span>✋ 手功能五階段線上課程</span><span>↗</span></a>
+          <a class="resource-link" href="https://shopee.tw/peter72401" target="_blank" rel="noopener"><span>🛠️ 3D 列印手部練習工具</span><span>↗</span></a>
+          <div class="social-row">
+            <a class="resource-link" href="https://lin.ee/4HnOdD4" target="_blank" rel="noopener"><span>💬 加入 LINE</span><span>↗</span></a>
+            <a class="resource-link" href="https://reliveot.github.io/card" target="_blank" rel="noopener"><span>🪪 互動電子名片</span><span>↗</span></a>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <!-- 2. Active Game View -->
+    <section id="gameView" class="stage-wrap hidden">
+      <div class="game-hud">
+        <div class="hud-row">
+          <div class="hud-card" style="flex:1;">
+            <div style="display:flex;justify-content:space-between;font-size:0.82rem;font-weight:800;margin-bottom:4px;">
+              <span id="hudStageTitle">台北市 · 台北 101</span>
+              <span id="hudStageProgress" style="color:#0f766e;">0 / 5</span>
+            </div>
+            <div class="progress-track"><div id="hudProgressFill" class="progress-fill"></div></div>
+          </div>
+          <div class="hud-card" style="text-align:right;">
+            <div style="font-size:0.72rem;color:#64748b;font-weight:700;">分數 / 收集</div>
+            <div style="font-size:0.95rem;font-weight:900;color:#ea580c;"><span id="hudScore">0</span> 分 · <span id="hudCount">0</span></div>
+          </div>
+        </div>
+        <div class="hud-row">
+          <button id="hudAlbumBtn" class="icon-btn" type="button" style="pointer-events:auto;">📖 收藏冊</button>
+          <button id="endGameBtn" class="icon-btn" type="button" style="pointer-events:auto;color:#dc2626;">🏁 結束騎乘</button>
+        </div>
+        <div id="centerCue" class="center-cue hidden">🎯 請將手機回正至中央，準備下一題！</div>
+      </div>
+
+      <canvas id="gameCanvas"></canvas>
+
+      <!-- Built-in Keyboard / Touch / Simulated Tilt Test Controls -->
+      <div class="test-controls">
+        <div class="lane-btn-row">
+          <button type="button" class="lane-btn" data-lane="-1">⬅️ 左側 (←)</button>
+          <button type="button" class="lane-btn active" data-lane="0">⬆️ 中央回正 (↓)</button>
+          <button type="button" class="lane-btn" data-lane="1">➡️ 右側 (→)</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:0.78rem;color:#475569;font-weight:700;">
+          <span>模擬手機傾斜：</span>
+          <input id="simTiltSlider" type="range" min="-40" max="40" value="0" style="flex:1;">
+          <span id="simTiltVal" style="min-width:34px;text-align:right;">0°</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Phone Controller View (?mode=controller) -->
+    <section id="controllerView" class="scroll-body hidden">
+      <section class="hero-card" style="padding:14px;">
+        <h1 style="font-size:1.2rem;">📱 手機傾斜控制器</h1>
+        <p>可重複使用的復健感測模組（TiltRehabKit）</p>
+      </section>
+
+      <div class="panel-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:800;font-size:0.92rem;">連線狀態</span>
+          <span id="ctrlConnStatus" class="pill">尚未連線</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <input id="ctrlRoomInput" type="text" inputmode="numeric" maxlength="6" placeholder="輸入 4 位數房號" style="flex:1;padding:10px;border-radius:10px;border:1px solid #cbd5e1;font-size:1rem;font-weight:800;">
+          <button id="ctrlConnectBtn" class="icon-btn" type="button" style="background:#0f766e;color:#fff;border-color:#0f766e;padding:10px 14px;">連線</button>
+        </div>
+      </div>
+
+      <div class="ctrl-gauge-wrap">
+        <div style="font-size:0.85rem;font-weight:700;color:#475569;">目前傾斜角度：<strong id="ctrlAngleReadout" style="font-size:1.2rem;color:#ea580c;">0°</strong></div>
+        <div class="angle-bar-bg"><div id="ctrlAngleDot" class="angle-bar-dot" style="left:50%;"></div></div>
+        <div class="ctrl-lane-display">
+          <div id="ctrlZoneLeft" class="ctrl-zone">⬅️ 左</div>
+          <div id="ctrlZoneCenter" class="ctrl-zone active">⬆️ 中</div>
+          <div id="ctrlZoneRight" class="ctrl-zone">➡️ 右</div>
+        </div>
+        <div id="ctrlSensorStatus" style="font-size:0.8rem;color:#64748b;margin-bottom:10px;">點擊下方按鈕啟動手機方向感測器</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <button id="ctrlStartSensorBtn" class="primary-btn" type="button" style="font-size:0.95rem;padding:12px;">📡 啟動感測器</button>
+          <button id="ctrlCalibrateBtn" class="secondary-btn" type="button" style="font-size:0.95rem;padding:12px;">🎯 校正中立位置</button>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div style="font-size:0.82rem;font-weight:700;color:#64748b;">觸控備援按鈕（無感測器時可用）</div>
+        <div class="lane-btn-row">
+          <button type="button" class="lane-btn ctrl-touch-btn" data-lane="-1">⬅️ 左</button>
+          <button type="button" class="lane-btn ctrl-touch-btn" data-lane="0">⬆️ 中</button>
+          <button type="button" class="lane-btn ctrl-touch-btn" data-lane="1">➡️ 右</button>
+        </div>
+      </div>
+
+      <button id="ctrlBackHomeBtn" class="icon-btn" type="button" style="justify-content:center;padding:10px;">← 返回遊戲首頁</button>
+    </section>
+  </div>
+
+  <!-- Landmark Unlock Modal -->
+  <div id="unlockModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="pill connected">🎉 解鎖新景點！</span>
+        <span id="unlockCounty" style="font-weight:800;color:#0f766e;"></span>
+      </div>
+      <img id="unlockImg" class="landmark-art" src="" alt="景點插畫">
+      <div>
+        <h2 id="unlockName" style="margin:0;font-size:1.3rem;color:#1e293b;"></h2>
+        <div id="unlockSubtitle" style="font-size:0.88rem;font-weight:700;color:#ea580c;margin-top:2px;"></div>
+        <p id="unlockDesc" style="margin:8px 0 0;font-size:0.9rem;line-height:1.55;color:#475569;"></p>
+      </div>
+      <button id="unlockContinueBtn" class="primary-btn" type="button">🚴 繼續下一站</button>
+      <button id="unlockAlbumBtn" class="secondary-btn" type="button">📖 查看景點收藏冊</button>
+    </div>
+  </div>
+
+  <!-- Landmark Album Modal -->
+  <div id="albumModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;font-size:1.15rem;color:#0f766e;">📖 台灣景點收藏冊</h2>
+        <button id="closeAlbumBtn" class="icon-btn" type="button">✕ 關閉</button>
+      </div>
+      <div id="albumGrid" class="album-grid"></div>
+      <div id="albumDetailBox" class="hidden" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px;">
+        <div id="albumDetailTitle" style="font-weight:800;color:#0f766e;"></div>
+        <div id="albumDetailDesc" style="font-size:0.84rem;color:#475569;margin-top:4px;line-height:1.45;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ride Summary Modal -->
+  <div id="summaryModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h2 style="margin:0;font-size:1.25rem;color:#0f766e;">🏁 本次環島練習結算</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div class="panel-card" style="padding:10px;">
+          <div style="font-size:0.76rem;color:#64748b;font-weight:700;">練習時間</div>
+          <div id="sumTime" style="font-size:1.25rem;font-weight:900;color:#1e293b;">00:00</div>
+        </div>
+        <div class="panel-card" style="padding:10px;">
+          <div style="font-size:0.76rem;color:#64748b;font-weight:700;">成功收集數量</div>
+          <div id="sumCount" style="font-size:1.25rem;font-weight:900;color:#ea580c;">0 個</div>
+        </div>
+        <div class="panel-card" style="padding:10px;">
+          <div style="font-size:0.76rem;color:#64748b;font-weight:700;">左右動作次數</div>
+          <div id="sumReps" style="font-size:1rem;font-weight:900;color:#0f766e;">左 0 / 右 0</div>
+        </div>
+        <div class="panel-card" style="padding:10px;">
+          <div style="font-size:0.76rem;color:#64748b;font-weight:700;">旅行進度</div>
+          <div id="sumProgress" style="font-size:1rem;font-weight:900;color:#0f766e;">0 / 9 縣市</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.84rem;font-weight:800;margin-bottom:6px;">解鎖的台灣景點</div>
+        <div id="sumLandmarks" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+      <button id="sumReplayBtn" class="primary-btn" type="button">🚴 再騎一次</button>
+      <button id="sumHomeBtn" class="secondary-btn" type="button">⚙️ 回到首頁設定</button>
+    </div>
+  </div>
+
+  <script src="js/tilt-controller.js"></script>
+  <script src="js/landmarks.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

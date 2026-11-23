@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>《騎遍台灣》共用手機傾斜控制器</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <script>
+    if (!new URLSearchParams(window.location.search).get('mode')) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('mode', 'controller');
+      window.location.replace('index.html' + url.search);
+    }
+  </script>
+</body>
+</html>
