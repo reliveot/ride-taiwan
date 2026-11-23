@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  const { LANDMARKS, PENGHU_SPECIAL, SPRINT_ROUTES, COLLECTIBLES, BUMP_SKINS, CYCLIST_SKINS, BIKES, CHARACTERS, UNITS_PER_STATION } = window.RideTaiwanData;
+  const { LANDMARKS, PENGHU_SPECIAL, SPRINT_ROUTES, COLLECTIBLES, BUMP_SKINS, CYCLIST_SKINS, BIKES, CHARACTERS, SPRITE_PATHS, UNITS_PER_STATION } = window.RideTaiwanData;
   const { TiltSensorEngine, RehabLink, requestWakeLock } = window.TiltRehabKit;
   const AudioFX = window.RehabAudio;
   const STORAGE_KEY = 'rtw_v2_save_data';
@@ -18,6 +18,25 @@
   };
 
   const $ = (id) => document.getElementById(id);
+
+  // --- Preload Watercolor Transparent PNG Sprites ---
+  const SPRITES = {};
+  if (SPRITE_PATHS) {
+    Object.keys(SPRITE_PATHS).forEach((k) => {
+      const img = new Image();
+      img.src = SPRITE_PATHS[k];
+      SPRITES[k] = img;
+    });
+  }
+  function drawSprite(ctx, key, x, y, w, h) {
+    const img = SPRITES[key];
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, x - w * 0.5, y - h * 0.5, w, h);
+      return true;
+    }
+    return false;
+  }
+
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -1363,9 +1382,11 @@
       if (lm.biome === 'ocean_right' || lm.biome === 'cliff_ocean' || lm.biome === 'paddy_ocean') {
         ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(rx + 6 * scale, y - 6 * scale, 9 * scale, 0, Math.PI * 2); ctx.fill(); // Coastal rocks/tetrapods
       } else {
-        ctx.fillStyle = '#78350f'; ctx.fillRect(rx - 3 * scale, y - 16 * scale, 6 * scale, 16 * scale);
-        ctx.fillStyle = lm.id === 'taipei_101' ? '#f9a8d4' : th.accent;
-        ctx.beginPath(); ctx.arc(rx, y - 24 * scale, 14 * scale, 0, Math.PI * 2); ctx.fill();
+        const tKey = (lm.id === 'taipei_101' || lm.id === 'alishan_forest') ? 'prop_sakura' : 'prop_palm';
+        if (!drawSprite(ctx, tKey, rx, y - 28 * scale, 56 * scale, 56 * scale)) {
+          ctx.fillStyle = '#78350f'; ctx.fillRect(rx - 3 * scale, y - 16 * scale, 6 * scale, 16 * scale);
+          ctx.fillStyle = th.accent; ctx.beginPath(); ctx.arc(rx, y - 24 * scale, 14 * scale, 0, Math.PI * 2); ctx.fill();
+        }
       }
     }
 
@@ -1399,8 +1420,12 @@
         ctx.beginPath(); ctx.arc(x, y, r * 1.32, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#fefce8'; ctx.strokeStyle = '#eab308'; ctx.lineWidth = 4;
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(ev.item.icon, x, y + 2);
+        const snackMap = { '🍌': 'item_banana', '🧋': 'item_boba', '🧴': 'item_water', '🍙': 'item_onigiri' };
+        const skey = snackMap[ev.item.icon];
+        if (!skey || !drawSprite(ctx, skey, x, y, r * 1.85, r * 1.85)) {
+          ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(ev.item.icon, x, y + 2);
+        }
         ctx.restore();
       } else if (ev.template === 'obstacle') {
         const p = 1 - ev.z;
@@ -1418,24 +1443,32 @@
             if (sk.ellipse) ctx.ellipse(x, y, r * 1.15, r * 0.58, 0, 0, Math.PI * 2);
             else ctx.arc(x, y, r * 0.9, 0, Math.PI * 2);
             ctx.fill(); ctx.stroke();
-            ctx.font = Math.round(r) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(sk.icon, x, y);
+            const bMap = { puddle: 'obs_puddle', rock: 'obs_rock', cone: 'obs_cone' };
+            if (!bMap[sk.id] || !drawSprite(ctx, bMap[sk.id], x, y, r * 2.1, r * 2.1)) {
+              ctx.font = Math.round(r) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+              ctx.fillText(sk.icon, x, y);
+            }
             ctx.restore();
           });
         } else if (ev.kind === 'cyclist') {
           const sk = ev.skin || CYCLIST_SKINS[0];
           const x = laneToScreenX(ev.lane, ev.z, w);
-          ctx.fillStyle = sk.bg; ctx.strokeStyle = sk.border; ctx.lineWidth = 3;
-          ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-          ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText(sk.icon, x, y + 1);
+          const vMap = { cyclist: 'veh_cyclist', scooter: 'veh_scooter', grandma: 'veh_grandma' };
+          if (!drawSprite(ctx, vMap[sk.id] || 'veh_cyclist', x, y - r * 0.25, r * 2.7, r * 2.7)) {
+            ctx.fillStyle = sk.bg; ctx.strokeStyle = sk.border; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            ctx.font = Math.round(r * 1.15) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(sk.icon, x, y + 1);
+          }
         } else if (ev.kind === 'construction') {
           ev.blockedLanes.forEach((bl) => {
             const x = laneToScreenX(bl, ev.z, w);
             ctx.fillStyle = '#fee2e2'; ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 3;
             ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-            ctx.font = Math.round(r * 1.1) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText('🚧', x, y + 1);
+            if (!drawSprite(ctx, 'obs_construction', x, y - r * 0.2, r * 2.4, r * 2.4)) {
+              ctx.font = Math.round(r * 1.1) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+              ctx.fillText('🚧', x, y + 1);
+            }
           });
           const sx = laneToScreenX(ev.safeLane, ev.z, w);
           ctx.fillStyle = '#22c55e'; ctx.font = 'bold ' + Math.round(r * 1.1) + 'px sans-serif'; ctx.textAlign = 'center';
@@ -1471,19 +1504,18 @@
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(lean);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
-    ctx.beginPath(); ctx.ellipse(0, 34, 28, 8, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.roundRect(-7, 4, 14, 32, 6); ctx.fill();
-    const curBike = BIKES.find((b) => b.id === state.bikeId) || BIKES[0];
-    const curChar = CHARACTERS.find((c) => c.id === state.charId) || CHARACTERS[0];
-    ctx.strokeStyle = curBike.frameColor; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.moveTo(0, 12); ctx.lineTo(0, -14); ctx.stroke();
-    ctx.strokeStyle = '#334155'; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.moveTo(-22, -22); ctx.lineTo(22, -22); ctx.stroke();
-    const bob = state.stoppedAtConstruction ? 0 : Math.sin(pedalPhase) * 2;
-    ctx.fillStyle = curChar.jersey; ctx.beginPath(); ctx.roundRect(-16, -40 + bob, 32, 32, 11); ctx.fill();
-    ctx.fillStyle = curChar.pack; ctx.beginPath(); ctx.roundRect(-11, -36 + bob, 22, 22, 7); ctx.fill();
-    ctx.fillStyle = curChar.helmet; ctx.beginPath(); ctx.arc(0, -52 + bob, 13, 0, Math.PI * 2); ctx.fill();
+    const bob = (state.stoppedAtConstruction || state.stoppedAtCorridor) ? 0 : Math.sin(pedalPhase) * 2.5;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
+    ctx.beginPath(); ctx.ellipse(0, 38, 34, 10, 0, 0, Math.PI * 2); ctx.fill();
+    const spriteKey = 'rider_' + (state.charId || 'ming');
+    if (!drawSprite(ctx, spriteKey, 0, -14 + bob, 118, 118)) {
+      const curBike = BIKES.find((b) => b.id === state.bikeId) || BIKES[0];
+      const curChar = CHARACTERS.find((c) => c.id === state.charId) || CHARACTERS[0];
+      ctx.strokeStyle = curBike.frameColor; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(0, 12); ctx.lineTo(0, -14); ctx.stroke();
+      ctx.fillStyle = curChar.jersey; ctx.beginPath(); ctx.roundRect(-16, -40 + bob, 32, 32, 11); ctx.fill();
+      ctx.fillStyle = curChar.helmet; ctx.beginPath(); ctx.arc(0, -52 + bob, 13, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.restore();
   }
 
