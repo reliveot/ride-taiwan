@@ -492,6 +492,56 @@
     showSummaryModal(record, isBest, sameCond.length > 0);
   }
 
+  // --- Multi-Scale Deterministic 1D Value Noise (no fixed sine repetition!) ---
+  function hash1D(n) {
+    let x = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+    return x - Math.floor(x);
+  }
+  function smoothNoise1D(x) {
+    const i = Math.floor(x);
+    const f = x - i;
+    const u = f * f * (3 - 2 * f);
+    return hash1D(i) * (1 - u) + hash1D(i + 1) * u;
+  }
+  function terrainNoise(worldDist) {
+    return smoothNoise1D(worldDist * 0.0012) * 0.6 +
+           smoothNoise1D(worldDist * 0.0031) * 0.28 +
+           smoothNoise1D(worldDist * 0.0073) * 0.12;
+  }
+
+  // --- Stage Director: 3 Varied Micro-Segment Rhythms per Station ---
+  function buildDirectorPlan(lm) {
+    const r = state.rng;
+    const variant = Math.floor(r() * 3);
+    if (variant === 0) {
+      return [
+        { pEnd: 0.16, type: 'open_cruise' },
+        { pEnd: 0.48, type: 'main_challenge' },
+        { pEnd: 0.78, type: 'terrain_feature' },
+        { pEnd: 1.00, type: 'open_stamp' }
+      ];
+    } else if (variant === 1) {
+      return [
+        { pEnd: 0.15, type: 'open_cruise' },
+        { pEnd: 0.45, type: 'terrain_feature' },
+        { pEnd: 0.80, type: 'main_challenge' },
+        { pEnd: 1.00, type: 'open_stamp' }
+      ];
+    }
+    return [
+      { pEnd: 0.14, type: 'open_cruise' },
+      { pEnd: 0.40, type: 'main_challenge' },
+      { pEnd: 0.56, type: 'open_cruise' },
+      { pEnd: 0.82, type: 'main_challenge' },
+      { pEnd: 1.00, type: 'open_stamp' }
+    ];
+  }
+
+  function getActiveStationObj(idx) {
+    if (state.mode === 'sprint' && state.sprintRouteId === 'penghu_island') return PENGHU_SPECIAL;
+    return LANDMARKS[idx % LANDMARKS.length] || LANDMARKS[0];
+  }
+
   // --- Stage Director & 5-Level Event Pattern Generator ---
   function enqueueWavePattern() {
     const r = state.rng;
