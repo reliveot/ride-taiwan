@@ -102,6 +102,7 @@
     pendingPostcardIdx: -1,
     directorSegIdx: 0,
     directorPlan: [],
+    stationStartUnits: 0, // world-coordinate offset for continued tour and sprint routes
     snackStyle: 'local',
     steeringMode: 'smooth',
     steerInput: 0,
@@ -236,11 +237,13 @@
   }
 
   function refreshHomeStats() {
-    $('openAlbumBtn').textContent = '📖 景點收藏冊 (' + saveData.unlockedIds.length + ' / ' + LANDMARKS.length + ')';
+    const albumItems = [...LANDMARKS, PENGHU_SPECIAL];
+    const albumCount = albumItems.filter((item) => saveData.unlockedIds.includes(item.id)).length;
+    $('openAlbumBtn').textContent = '📖 景點收藏冊 (' + albumCount + ' / ' + albumItems.length + ')';
     const loopPct = Math.round(((saveData.tourUnits % (UNITS_PER_STATION * LANDMARKS.length)) / (UNITS_PER_STATION * LANDMARKS.length)) * 100);
     $('homeTourBadge').textContent = '第 ' + (saveData.loopsCompleted + 1) + ' 圈 ' + loopPct + '%';
     if ($('homeTotalDistText')) {
-      $('homeTotalDistText').textContent = '累計總里程：' + saveData.tourUnits + ' 單位 · 已收集 ' + saveData.unlockedIds.length + ' / ' + LANDMARKS.length + ' 站';
+      $('homeTotalDistText').textContent = '累計總里程：' + saveData.tourUnits + ' 單位 · 已收集 ' + albumCount + ' / ' + albumItems.length + ' 處景點';
     }
     renderGarage();
   }
@@ -437,6 +440,13 @@
       state.rng = Math.random;
     }
 
+    const sprintRoute = state.mode === 'sprint'
+      ? (SPRINT_ROUTES.find((r) => r.id === state.sprintRouteId) || SPRINT_ROUTES[0]) : null;
+    state.stationStartUnits = sprintRoute
+      ? sprintRoute.startStation * UNITS_PER_STATION
+      : saveData.tourUnits;
+    state.completedStationsCount = Math.floor(state.stationStartUnits / UNITS_PER_STATION);
+
     const startIdx = getCurrentStationIndex();
     state.prevStationIdx = startIdx;
     state.curStationIdx = startIdx;
@@ -528,6 +538,20 @@
            smoothNoise1D(worldDist * 0.0073) * 0.12;
   }
 
+  // Choose a valid snack for the current stage. V3.1 called pickSnack() without
+  // defining it, which threw a ReferenceError as soon as the game started.
+  function pickSnack() {
+    if (state.snackStyle === 'local') {
+      const station = getActiveStationObj(getCurrentStationIndex());
+      if (station && station.localSnack) return station.localSnack;
+    }
+    const pool = state.snackStyle === 'basic'
+      ? COLLECTIBLES.filter((item) => item.id === 'banana' || item.id === 'water')
+      : COLLECTIBLES;
+    const choices = pool.length ? pool : COLLECTIBLES;
+    return choices[Math.floor(state.rng() * choices.length)] || COLLECTIBLES[0];
+  }
+
   // --- Stage Director: 3 Varied Micro-Segment Rhythms per Station ---
   function buildDirectorPlan(lm) {
     const r = state.rng;
@@ -561,19 +585,11 @@
     return LANDMARKS[idx % LANDMARKS.length] || LANDMARKS[0];
   }
 
-  function pickSnack() {
-    if (state.snackStyle === 'local') {
-      const lm = getActiveStationObj(state.curStationIdx);
-      if (lm && lm.localSnack) return lm.localSnack;
-    }
-    return COLLECTIBLES[Math.floor(state.rng() * COLLECTIBLES.length)];
-  }
-
   // --- Stage Director & 5-Level Event Pattern Generator ---
   function enqueueWavePattern() {
     const r = state.rng;
     const cfg = LEVEL_CONFIG[state.level] || LEVEL_CONFIG.L1;
-    const stationProgress = (state.distance % UNITS_PER_STATION) / UNITS_PER_STATION;
+    const stationProgress = ((state.stationStartUnits + state.distance) % UNITS_PER_STATION) / UNITS_PER_STATION;
     const seg = state.directorPlan.find((p) => stationProgress <= p.pEnd) || { type: 'open_cruise' };
     state.hasMovedSinceSpawn = false;
 
@@ -764,18 +780,20 @@
   }
 
   function triggerPassingLandmark(idx) {
-    const obsClose = state.events.some((e) => e.template === 'obstacle' && e.z < 0.45);
-    if (obsClose) {
-      state.pendingPostcardIdx = idx;
-      return;
-    }
     const lm = getActiveStationObj(idx);
     if (!lm) return;
+    // Unlock immediately on crossing the station boundary; defer only the toast.
     if (!saveData.unlockedIds.includes(lm.id)) {
       saveData.unlockedIds.push(lm.id);
       state.newUnlockedThisRun.push(lm);
       writeSave(saveData);
     }
+    const obsClose = state.events.some((e) => e.template === 'obstacle' && e.z < 0.45);
+    if (obsClose) {
+      state.pendingPostcardIdx = idx;
+      return;
+    }
+    state.pendingPostcardIdx = -1;
     AudioFX.playStamp();
     if (lm.image) {
       $('postcardImg').src = lm.image;
@@ -838,6 +856,8 @@
         state.prevStationIdx = state.curStationIdx;
         state.curStationIdx = curIdx;
         state.biomeFade = 0;
+        // Stage director needs a new plan on every location change.
+        state.directorPlan = buildDirectorPlan(getActiveStationObj(curIdx));
       }
       if (state.biomeFade < 1) state.biomeFade = Math.min(1, state.biomeFade + dt / 1.8);
       const curLm = LANDMARKS[curIdx] || LANDMARKS[0];
@@ -876,14 +896,22 @@
     state.pedalPhase += dt * (state.currentSpeedUnits * 0.065);
     state.roadScroll = (state.roadScroll + dt * (state.currentSpeedUnits * 0.013)) % 1;
 
-    const completed = Math.floor(state.distance / UNITS_PER_STATION);
+    const completed = Math.floor((state.stationStartUnits + state.distance) / UNITS_PER_STATION);
     if (completed > state.completedStationsCount) {
-      const finishedIdx = (getCurrentStationIndex() - 1 + LANDMARKS.length) % LANDMARKS.length;
+      // Starting midway through a station must not shift the stamp position.
+      for (let station = state.completedStationsCount; station < completed; station++) {
+        triggerPassingLandmark(((station % LANDMARKS.length) + LANDMARKS.length) % LANDMARKS.length);
+      }
       state.completedStationsCount = completed;
-      triggerPassingLandmark(finishedIdx);
     }
 
     updateEventsQueue(dt);
+    if (state.pendingPostcardIdx >= 0 &&
+        !state.events.some((e) => e.template === 'obstacle' && e.z < 0.45)) {
+      const pending = state.pendingPostcardIdx;
+      state.pendingPostcardIdx = -1;
+      triggerPassingLandmark(pending);
+    }
 
     if (state.events.length === 0) {
       state.emptyRoadSec += dt;
@@ -953,7 +981,7 @@
           state.stamina = Math.min(100, state.stamina + heal);
           state.collectedCount += 1;
           AudioFX.playCollect();
-          spawnFeedback(ev.lane, '+' + ev.item.stamina + '% 體力 ' + ev.item.icon, ev.item.color);
+          spawnFeedback(ev.lane, '+' + heal + '% 體力 ' + ev.item.icon, ev.item.color);
           state.events.splice(i, 1);
           continue;
         }
@@ -969,7 +997,8 @@
               state.stoppedAtConstruction = true;
               state.constructionWaitSec = 0;
               state.stopCount += 1;
-              state.combo = 0;
+              ev.hadToStop = true;
+              recordEventOutcome(false, ev.safeLane, true, false);
               AudioFX.playBump();
               const dirText = ev.safeLane === -1 ? '左側' : (ev.safeLane === 0 ? '中央' : '右側');
               showBanner('🛑 施工停車！請換到' + dirText + '車道繼續前進', 'warn');
@@ -982,8 +1011,9 @@
           } else {
             state.constructionWaitSec += dt;
             if (state.lane === ev.safeLane || state.constructionWaitSec >= 6.0) {
+              state.assistedCount += 1; // correction or automatic assisted passage
               if (state.constructionWaitSec >= 6.0) showBanner('👷 辛苦了！工作人員幫您開便道通過～', '');
-              else { hideBanner(); recordEventOutcome(true, ev.safeLane); }
+              else hideBanner();
               state.stoppedAtConstruction = false;
               state.events.splice(i, 1);
             }
@@ -1063,6 +1093,7 @@
         } else {
           const inSafe = Math.abs(state.bikeXNorm - curCenterLane) < 0.58;
           if (!inSafe) {
+            ev.hadCorrection = true;
             state.stoppedAtCorridor = true;
             state.corridorWaitSec += dt;
             if (state.corridorWaitSec >= 6.0) {
@@ -1070,7 +1101,8 @@
               state.corridorWaitSec = 0;
               state.corridorExiting = true;
               state.corridorExitSec = 0;
-              recordEventOutcome(false, state.lane, false, false);
+              recordEventOutcome(false, state.lane, true, false);
+              state.assistedCount += 1;
               showBanner('👷 辛苦了！已開啟便道協助通過', '');
             } else if (state.corridorWaitSec >= 3.0) {
               showBanner('👉👉 請往' + dirName + '移動！(' + Math.ceil(6 - state.corridorWaitSec) + '秒後協助放行)', 'warn');
@@ -1094,11 +1126,18 @@
                 state.stoppedAtCorridor = false;
                 state.corridorExiting = true;
                 state.corridorExitSec = 0;
-                recordEventOutcome(true, state.lane, true, state.level !== 'L1' || state.hasMovedSinceSpawn);
-                state.boostTimer = 1.0;
-                state.accelCount += 1;
-                AudioFX.playBoost();
-                spawnFeedback(state.lane, '✨ 單線彎道通過！加速 1 秒', '#0f766e');
+                const firstTry = !ev.hadCorrection && (state.level !== 'L1' || state.hasMovedSinceSpawn);
+                recordEventOutcome(firstTry, state.lane, true, firstTry);
+                if (ev.hadCorrection) state.assistedCount += 1;
+                state.boostTimer = firstTry ? 1.0 : 0;
+
+                if (firstTry) {
+                  state.accelCount += 1;
+                  AudioFX.playBoost();
+                  spawnFeedback(state.lane, '✨ 單線彎道通過！加速 1 秒', '#0f766e');
+                } else {
+                  spawnFeedback(state.lane, '已完成通道調整', '#0f766e');
+                }
                 showBanner('🛣️ 道路恢復寬闊三線道！', 'boost');
               }
             }
@@ -1316,7 +1355,8 @@
     const activeCorridor = state.events.find((e) => e.template === 'corridor');
 
     if (activeCorridor) {
-      const safeLane = activeCorridor.seq[activeCorridor.segIndex];
+      // During the corridor exit animation segIndex is already past the last segment.
+      const safeLane = activeCorridor.seq[Math.min(activeCorridor.segIndex, activeCorridor.seq.length - 1)] ?? 0;
       const tr = state.corridorTransition;
       const fL = state.corridorCurL;
       const fR = state.corridorCurR;
@@ -1564,7 +1604,7 @@
   function showAlbumModal() {
     const grid = $('albumGrid');
     grid.innerHTML = '';
-    LANDMARKS.forEach((lm) => {
+    [...LANDMARKS, PENGHU_SPECIAL].forEach((lm) => {
       const ok = saveData.unlockedIds.includes(lm.id);
       const card = document.createElement('div');
       card.className = 'album-item' + (ok ? '' : ' locked');
